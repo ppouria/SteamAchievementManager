@@ -1,0 +1,61 @@
+name: Build And Zip
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      CONFIGURATION: Release
+      PLATFORM: x86
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore
+        run: nuget restore SAM.sln
+
+      - name: Build
+        run: msbuild SAM.sln /m /p:Configuration=${{ env.CONFIGURATION }} /p:Platform=${{ env.PLATFORM }}
+
+      - name: Pack ZIP
+        id: pack
+        shell: pwsh
+        run: |
+          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
+          $zipName = "SteamAchievementManager-${env:GITHUB_RUN_NUMBER}-${shortSha}.zip"
+
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -Path LICENSE.txt -Destination dist\LICENSE.txt -Force
+          git log --no-color --decorate=short > dist\git-log.txt
+          Copy-Item -Path upload\*.exe -Destination dist -Force
+          Copy-Item -Path upload\*.dll -Destination dist -Force
+
+          Compress-Archive -Path dist\* -DestinationPath $zipName -CompressionLevel Optimal -Force
+          "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.zip_name }}
+          path: ${{ steps.pack.outputs.zip_name }}
+          if-no-files-found: error

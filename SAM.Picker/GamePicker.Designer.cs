@@ -31,9 +31,13 @@
             this.components = new System.ComponentModel.Container();
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator1;
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator2;
+            System.Windows.Forms.ToolStripSeparator _ToolStripSeparator3;
+            System.Windows.Forms.ToolStripSeparator _ToolStripSeparator4;
+            System.Windows.Forms.ToolStripSeparator _ToolStripSeparator5;
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(GamePicker));
             this._LogoImageList = new System.Windows.Forms.ImageList(this.components);
             this._CallbackTimer = new System.Windows.Forms.Timer(this.components);
+            this._LoadingSpinnerTimer = new System.Windows.Forms.Timer(this.components);
             this._PickerToolStrip = new System.Windows.Forms.ToolStrip();
             this._RefreshGamesButton = new System.Windows.Forms.ToolStripButton();
             this._AddGameTextBox = new System.Windows.Forms.ToolStripTextBox();
@@ -45,14 +49,27 @@
             this._FilterDemosMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterModsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterJunkMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._FilterIncompleteAchievementsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ViewGridMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ViewListMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._SortNameAscendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._SortNameDescendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._SortAchievementAscendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._SortAchievementDescendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ShowLogsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._FilterLoadingLabel = new System.Windows.Forms.ToolStripLabel();
             this._GameListView = new SAM.Picker.MyListView();
             this._PickerStatusStrip = new System.Windows.Forms.StatusStrip();
             this._PickerStatusLabel = new System.Windows.Forms.ToolStripStatusLabel();
             this._DownloadStatusLabel = new System.Windows.Forms.ToolStripStatusLabel();
             this._LogoWorker = new System.ComponentModel.BackgroundWorker();
             this._ListWorker = new System.ComponentModel.BackgroundWorker();
+            this._AchievementWorker = new System.ComponentModel.BackgroundWorker();
             _ToolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             _ToolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
+            _ToolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
+            _ToolStripSeparator4 = new System.Windows.Forms.ToolStripSeparator();
+            _ToolStripSeparator5 = new System.Windows.Forms.ToolStripSeparator();
             this._PickerToolStrip.SuspendLayout();
             this._PickerStatusStrip.SuspendLayout();
             this.SuspendLayout();
@@ -67,6 +84,21 @@
             _ToolStripSeparator2.Name = "_ToolStripSeparator2";
             _ToolStripSeparator2.Size = new System.Drawing.Size(6, 25);
             //
+            // _ToolStripSeparator3
+            //
+            _ToolStripSeparator3.Name = "_ToolStripSeparator3";
+            _ToolStripSeparator3.Size = new System.Drawing.Size(255, 6);
+            //
+            // _ToolStripSeparator4
+            //
+            _ToolStripSeparator4.Name = "_ToolStripSeparator4";
+            _ToolStripSeparator4.Size = new System.Drawing.Size(255, 6);
+            //
+            // _ToolStripSeparator5
+            //
+            _ToolStripSeparator5.Name = "_ToolStripSeparator5";
+            _ToolStripSeparator5.Size = new System.Drawing.Size(255, 6);
+            //
             // _LogoImageList
             //
             this._LogoImageList.ColorDepth = System.Windows.Forms.ColorDepth.Depth24Bit;
@@ -78,6 +110,11 @@
             this._CallbackTimer.Enabled = true;
             this._CallbackTimer.Tick += new System.EventHandler(this.OnTimer);
             //
+            // _LoadingSpinnerTimer
+            //
+            this._LoadingSpinnerTimer.Interval = 140;
+            this._LoadingSpinnerTimer.Tick += new System.EventHandler(this.OnLoadingSpinnerTick);
+            //
             // _PickerToolStrip
             //
             this._PickerToolStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
@@ -88,7 +125,8 @@
             _ToolStripSeparator2,
             this._FindGamesLabel,
             this._SearchGameTextBox,
-            this._FilterDropDownButton});
+            this._FilterDropDownButton,
+            this._FilterLoadingLabel});
             this._PickerToolStrip.Location = new System.Drawing.Point(0, 0);
             this._PickerToolStrip.Name = "_PickerToolStrip";
             this._PickerToolStrip.Size = new System.Drawing.Size(742, 25);
@@ -139,7 +177,18 @@
             this._FilterGamesMenuItem,
             this._FilterDemosMenuItem,
             this._FilterModsMenuItem,
-            this._FilterJunkMenuItem});
+            this._FilterJunkMenuItem,
+            this._FilterIncompleteAchievementsMenuItem,
+            _ToolStripSeparator3,
+            this._ViewGridMenuItem,
+            this._ViewListMenuItem,
+            _ToolStripSeparator4,
+            this._SortNameAscendingMenuItem,
+            this._SortNameDescendingMenuItem,
+            this._SortAchievementAscendingMenuItem,
+            this._SortAchievementDescendingMenuItem,
+            _ToolStripSeparator5,
+            this._ShowLogsMenuItem});
             this._FilterDropDownButton.Image = global::SAM.Picker.Resources.Filter;
             this._FilterDropDownButton.ImageTransparentColor = System.Drawing.Color.Magenta;
             this._FilterDropDownButton.Name = "_FilterDropDownButton";
@@ -152,7 +201,7 @@
             this._FilterGamesMenuItem.CheckOnClick = true;
             this._FilterGamesMenuItem.CheckState = System.Windows.Forms.CheckState.Checked;
             this._FilterGamesMenuItem.Name = "_FilterGamesMenuItem";
-            this._FilterGamesMenuItem.Size = new System.Drawing.Size(180, 22);
+            this._FilterGamesMenuItem.Size = new System.Drawing.Size(258, 22);
             this._FilterGamesMenuItem.Text = "Show &games";
             this._FilterGamesMenuItem.CheckedChanged += new System.EventHandler(this.OnFilterUpdate);
             //
@@ -160,7 +209,7 @@
             //
             this._FilterDemosMenuItem.CheckOnClick = true;
             this._FilterDemosMenuItem.Name = "_FilterDemosMenuItem";
-            this._FilterDemosMenuItem.Size = new System.Drawing.Size(180, 22);
+            this._FilterDemosMenuItem.Size = new System.Drawing.Size(258, 22);
             this._FilterDemosMenuItem.Text = "Show &demos";
             this._FilterDemosMenuItem.CheckedChanged += new System.EventHandler(this.OnFilterUpdate);
             //
@@ -168,7 +217,7 @@
             //
             this._FilterModsMenuItem.CheckOnClick = true;
             this._FilterModsMenuItem.Name = "_FilterModsMenuItem";
-            this._FilterModsMenuItem.Size = new System.Drawing.Size(180, 22);
+            this._FilterModsMenuItem.Size = new System.Drawing.Size(258, 22);
             this._FilterModsMenuItem.Text = "Show &mods";
             this._FilterModsMenuItem.CheckedChanged += new System.EventHandler(this.OnFilterUpdate);
             //
@@ -176,9 +225,79 @@
             //
             this._FilterJunkMenuItem.CheckOnClick = true;
             this._FilterJunkMenuItem.Name = "_FilterJunkMenuItem";
-            this._FilterJunkMenuItem.Size = new System.Drawing.Size(180, 22);
+            this._FilterJunkMenuItem.Size = new System.Drawing.Size(258, 22);
             this._FilterJunkMenuItem.Text = "Show &junk";
             this._FilterJunkMenuItem.CheckedChanged += new System.EventHandler(this.OnFilterUpdate);
+            //
+            // _FilterIncompleteAchievementsMenuItem
+            //
+            this._FilterIncompleteAchievementsMenuItem.CheckOnClick = true;
+            this._FilterIncompleteAchievementsMenuItem.Name = "_FilterIncompleteAchievementsMenuItem";
+            this._FilterIncompleteAchievementsMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._FilterIncompleteAchievementsMenuItem.Text = "Show only games with &incomplete achievements";
+            this._FilterIncompleteAchievementsMenuItem.CheckedChanged += new System.EventHandler(this.OnFilterUpdate);
+            //
+            // _ViewGridMenuItem
+            //
+            this._ViewGridMenuItem.Checked = true;
+            this._ViewGridMenuItem.CheckState = System.Windows.Forms.CheckState.Checked;
+            this._ViewGridMenuItem.Name = "_ViewGridMenuItem";
+            this._ViewGridMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._ViewGridMenuItem.Text = "View: &grid";
+            this._ViewGridMenuItem.Click += new System.EventHandler(this.OnViewGrid);
+            //
+            // _ViewListMenuItem
+            //
+            this._ViewListMenuItem.Name = "_ViewListMenuItem";
+            this._ViewListMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._ViewListMenuItem.Text = "View: &list";
+            this._ViewListMenuItem.Click += new System.EventHandler(this.OnViewList);
+            //
+            // _SortNameAscendingMenuItem
+            //
+            this._SortNameAscendingMenuItem.Checked = true;
+            this._SortNameAscendingMenuItem.CheckState = System.Windows.Forms.CheckState.Checked;
+            this._SortNameAscendingMenuItem.Name = "_SortNameAscendingMenuItem";
+            this._SortNameAscendingMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._SortNameAscendingMenuItem.Text = "Sort: Name &A-Z";
+            this._SortNameAscendingMenuItem.Click += new System.EventHandler(this.OnSortNameAscending);
+            //
+            // _SortNameDescendingMenuItem
+            //
+            this._SortNameDescendingMenuItem.Name = "_SortNameDescendingMenuItem";
+            this._SortNameDescendingMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._SortNameDescendingMenuItem.Text = "Sort: Name &Z-A";
+            this._SortNameDescendingMenuItem.Click += new System.EventHandler(this.OnSortNameDescending);
+            //
+            // _SortAchievementAscendingMenuItem
+            //
+            this._SortAchievementAscendingMenuItem.Name = "_SortAchievementAscendingMenuItem";
+            this._SortAchievementAscendingMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._SortAchievementAscendingMenuItem.Text = "Sort: Achievement 0% -> 100%";
+            this._SortAchievementAscendingMenuItem.Click += new System.EventHandler(this.OnSortAchievementAscending);
+            //
+            // _SortAchievementDescendingMenuItem
+            //
+            this._SortAchievementDescendingMenuItem.Name = "_SortAchievementDescendingMenuItem";
+            this._SortAchievementDescendingMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._SortAchievementDescendingMenuItem.Text = "Sort: Achievement 100% -> 0%";
+            this._SortAchievementDescendingMenuItem.Click += new System.EventHandler(this.OnSortAchievementDescending);
+            //
+            // _ShowLogsMenuItem
+            //
+            this._ShowLogsMenuItem.Name = "_ShowLogsMenuItem";
+            this._ShowLogsMenuItem.Size = new System.Drawing.Size(258, 22);
+            this._ShowLogsMenuItem.Text = "Show &logs";
+            this._ShowLogsMenuItem.Click += new System.EventHandler(this.OnShowLogs);
+            //
+            // _FilterLoadingLabel
+            //
+            this._FilterLoadingLabel.AutoSize = false;
+            this._FilterLoadingLabel.Name = "_FilterLoadingLabel";
+            this._FilterLoadingLabel.Size = new System.Drawing.Size(26, 22);
+            this._FilterLoadingLabel.Text = "[|]";
+            this._FilterLoadingLabel.ToolTipText = "Loading";
+            this._FilterLoadingLabel.Visible = false;
             //
             // _GameListView
             //
@@ -241,6 +360,14 @@
             this._ListWorker.DoWork += new System.ComponentModel.DoWorkEventHandler(this.DoDownloadList);
             this._ListWorker.RunWorkerCompleted += new System.ComponentModel.RunWorkerCompletedEventHandler(this.OnDownloadList);
             //
+            // _AchievementWorker
+            //
+            this._AchievementWorker.WorkerReportsProgress = true;
+            this._AchievementWorker.WorkerSupportsCancellation = true;
+            this._AchievementWorker.DoWork += new System.ComponentModel.DoWorkEventHandler(this.DoScanAchievements);
+            this._AchievementWorker.ProgressChanged += new System.ComponentModel.ProgressChangedEventHandler(this.OnScanAchievementsProgress);
+            this._AchievementWorker.RunWorkerCompleted += new System.ComponentModel.RunWorkerCompletedEventHandler(this.OnScanAchievementsCompleted);
+            //
             // GamePicker
             //
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -269,6 +396,7 @@
         private System.Windows.Forms.ToolStripButton _AddGameButton;
         private System.Windows.Forms.ToolStripDropDownButton _FilterDropDownButton;
         private System.Windows.Forms.ToolStripMenuItem _FilterGamesMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _FilterIncompleteAchievementsMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterJunkMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterDemosMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterModsMenuItem;
@@ -277,8 +405,18 @@
         private System.Windows.Forms.ToolStripStatusLabel _PickerStatusLabel;
         private System.ComponentModel.BackgroundWorker _LogoWorker;
         private System.ComponentModel.BackgroundWorker _ListWorker;
+        private System.ComponentModel.BackgroundWorker _AchievementWorker;
         private System.Windows.Forms.ToolStripTextBox _SearchGameTextBox;
         private System.Windows.Forms.ToolStripLabel _FindGamesLabel;
+        private System.Windows.Forms.Timer _LoadingSpinnerTimer;
+        private System.Windows.Forms.ToolStripLabel _FilterLoadingLabel;
+        private System.Windows.Forms.ToolStripMenuItem _ViewGridMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _ViewListMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _SortNameAscendingMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _SortNameDescendingMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _SortAchievementAscendingMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _SortAchievementDescendingMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _ShowLogsMenuItem;
 
         #endregion
     }

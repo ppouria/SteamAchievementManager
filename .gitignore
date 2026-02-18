@@ -12,6 +12,7 @@
 **/Properties/launchSettings.json
 private/
 upload/
+bin_test/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

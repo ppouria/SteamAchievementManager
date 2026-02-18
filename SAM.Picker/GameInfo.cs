@@ -43,6 +43,23 @@ namespace SAM.Picker
 
         public ListViewItem Item;
 
+        public int AchievementUnlocked;
+        public int AchievementTotal;
+
+        public bool HasAchievementProgress => this.AchievementUnlocked >= 0 && this.AchievementTotal >= 0;
+
+        public bool HasIncompleteAchievements =>
+            this.HasAchievementProgress == true &&
+            this.AchievementTotal > 0 &&
+            this.AchievementUnlocked < this.AchievementTotal;
+
+        public string DisplayName => this.HasAchievementProgress switch
+        {
+            true when this.AchievementTotal > 0 => $"{this.Name} ({this.AchievementUnlocked}/{this.AchievementTotal})",
+            true => $"{this.Name} (no achievements)",
+            false => this.Name,
+        };
+
         public GameInfo(uint id, string type)
         {
             this.Id = id;
@@ -50,6 +67,8 @@ namespace SAM.Picker
             this.Name = null;
             this.ImageIndex = 0;
             this.ImageUrl = null;
+            this.AchievementUnlocked = -1;
+            this.AchievementTotal = -1;
         }
     }
 }
