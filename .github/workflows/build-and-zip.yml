@@ -70,5 +70,6 @@ jobs:
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           files: ${{ steps.pack.outputs.zip_path }}
           overwrite_files: true
