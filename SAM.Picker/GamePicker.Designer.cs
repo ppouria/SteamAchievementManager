@@ -36,6 +36,7 @@
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator5;
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(GamePicker));
             this._LogoImageList = new System.Windows.Forms.ImageList(this.components);
+            this._LogoSmallImageList = new System.Windows.Forms.ImageList(this.components);
             this._CallbackTimer = new System.Windows.Forms.Timer(this.components);
             this._LoadingSpinnerTimer = new System.Windows.Forms.Timer(this.components);
             this._PickerToolStrip = new System.Windows.Forms.ToolStrip();
@@ -107,6 +108,12 @@
             this._LogoImageList.ColorDepth = System.Windows.Forms.ColorDepth.Depth24Bit;
             this._LogoImageList.ImageSize = new System.Drawing.Size(184, 69);
             this._LogoImageList.TransparentColor = System.Drawing.Color.Transparent;
+            //
+            // _LogoSmallImageList
+            //
+            this._LogoSmallImageList.ColorDepth = System.Windows.Forms.ColorDepth.Depth24Bit;
+            this._LogoSmallImageList.ImageSize = new System.Drawing.Size(96, 36);
+            this._LogoSmallImageList.TransparentColor = System.Drawing.Color.Transparent;
             //
             // _CallbackTimer
             //
@@ -344,7 +351,7 @@
             this._GameListView.Name = "_GameListView";
             this._GameListView.OwnerDraw = true;
             this._GameListView.Size = new System.Drawing.Size(742, 245);
-            this._GameListView.SmallImageList = this._LogoImageList;
+            this._GameListView.SmallImageList = this._LogoSmallImageList;
             this._GameListView.Sorting = System.Windows.Forms.SortOrder.Ascending;
             this._GameListView.TabIndex = 0;
             this._GameListView.TileSize = new System.Drawing.Size(184, 69);
@@ -422,6 +429,7 @@
 
         private MyListView _GameListView;
         private System.Windows.Forms.ImageList _LogoImageList;
+        private System.Windows.Forms.ImageList _LogoSmallImageList;
         private System.Windows.Forms.Timer _CallbackTimer;
         private System.Windows.Forms.ToolStrip _PickerToolStrip;
         private System.Windows.Forms.ToolStripButton _RefreshGamesButton;

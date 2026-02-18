@@ -334,6 +334,14 @@ namespace SAM.Picker
 
             this._LogoImageList.Images.Add("Blank", blank);
 
+            Bitmap blankSmall = new(this._LogoSmallImageList.ImageSize.Width, this._LogoSmallImageList.ImageSize.Height);
+            using (var g = Graphics.FromImage(blankSmall))
+            {
+                g.Clear(Color.DimGray);
+            }
+
+            this._LogoSmallImageList.Images.Add("Blank", blankSmall);
+
             this._SteamClient = client;
             this._SteamWebApiKey = GetSteamWebApiKey();
             this._SteamCommunityCookies = GetSteamCommunityCookies();
@@ -1331,6 +1339,12 @@ namespace SAM.Picker
                 Text = info.DisplayName,
                 ImageIndex = info.ImageIndex,
             };
+
+            if (info.ImageIndex <= 0)
+            {
+                this.AddGameToLogoQueue(info);
+                this.DownloadNextLogo();
+            }
         }
 
         private void OnGameListViewSearchForVirtualItem(object sender, SearchForVirtualItemEventArgs e)
@@ -2923,6 +2937,7 @@ namespace SAM.Picker
                 this._GameListView.BeginUpdate();
                 var imageIndex = this._LogoImageList.Images.Count;
                 this._LogoImageList.Images.Add(gameInfo.ImageUrl, logoInfo.Bitmap);
+                this._LogoSmallImageList.Images.Add(gameInfo.ImageUrl, logoInfo.Bitmap);
                 gameInfo.ImageIndex = imageIndex;
                 this._GameListView.EndUpdate();
             }
