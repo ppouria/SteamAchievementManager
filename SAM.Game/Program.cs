@@ -178,6 +178,10 @@ namespace SAM.Game
             var callHandle = client.SteamUserStats.RequestUserStats(steamId);
             if (callHandle == API.CallHandle.Invalid)
             {
+                if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
+                {
+                    return true;
+                }
                 return false;
             }
 
@@ -190,6 +194,10 @@ namespace SAM.Game
 
             if (callbackReceived == false || callbackResult != 1)
             {
+                if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
+                {
+                    return true;
+                }
                 return false;
             }
 
@@ -222,6 +230,29 @@ namespace SAM.Game
             unlocked = achieved;
             total = found;
             return true;
+        }
+
+        private static bool TryTreatAsNoAchievementGame(API.Client client, out int unlocked, out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            try
+            {
+                var achievementCount = client.SteamUserStats.GetNumAchievements();
+                if (achievementCount != 0)
+                {
+                    return false;
+                }
+
+                unlocked = 0;
+                total = 0;
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
         }
     }
 }

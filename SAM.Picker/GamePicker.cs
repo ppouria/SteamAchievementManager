@@ -33,9 +33,12 @@ using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using System.Xml;
 using System.Xml.XPath;
 using static SAM.Picker.InvariantShorthand;
 using APITypes = SAM.API.Types;
@@ -61,6 +64,12 @@ namespace SAM.Picker
             AchievementDescending,
         }
 
+        private enum AchievementScanMode
+        {
+            Auto,
+            LocalCheckAll,
+        }
+
         private readonly API.Client _SteamClient;
 
         private readonly Dictionary<uint, GameInfo> _Games;
@@ -73,11 +82,12 @@ namespace SAM.Picker
 
         private readonly API.Callbacks.AppDataChanged _AppDataChangedCallback;
         private readonly string _SteamWebApiKey;
-        private readonly Dictionary<string, string> _SteamCommunityCookies;
+        private Dictionary<string, string> _SteamCommunityCookies;
 
         private int _AchievementScanCompleted;
         private int _AchievementScanTotal;
         private bool _AchievementScanPending;
+        private AchievementScanMode _CurrentAchievementScanMode;
         private int _LoadingSpinnerFrame;
         private GameViewMode _ViewMode;
         private GameSortMode _SortMode;
@@ -88,12 +98,14 @@ namespace SAM.Picker
             public readonly ulong SteamId;
             public readonly string SteamWebApiKey;
             public readonly Dictionary<string, string> CommunityCookies;
+            public readonly AchievementScanMode Mode;
 
             public AchievementScanRequest(
                 List<uint> gameIds,
                 ulong steamId,
                 string steamWebApiKey,
-                Dictionary<string, string> communityCookies)
+                Dictionary<string, string> communityCookies,
+                AchievementScanMode mode)
             {
                 this.GameIds = gameIds;
                 this.SteamId = steamId;
@@ -101,6 +113,7 @@ namespace SAM.Picker
                 this.CommunityCookies = communityCookies != null
                     ? new Dictionary<string, string>(communityCookies, StringComparer.OrdinalIgnoreCase)
                     : null;
+                this.Mode = mode;
             }
         }
 
@@ -166,6 +179,40 @@ namespace SAM.Picker
             public uint AppId { get; set; }
         }
 
+        private sealed class OwnedGameInfo
+        {
+            public uint AppId { get; set; }
+            public string Name { get; set; }
+            public bool HasStatsLink { get; set; }
+            public int AchievementUnlocked { get; set; } = -1;
+            public int AchievementTotal { get; set; } = -1;
+            public bool HasAchievementProgress => this.AchievementUnlocked >= 0 && this.AchievementTotal >= 0;
+        }
+
+        [DataContract]
+        private sealed class OwnedGamesResponse
+        {
+            [DataMember(Name = "response")]
+            public OwnedGamesPayload Response { get; set; }
+        }
+
+        [DataContract]
+        private sealed class OwnedGamesPayload
+        {
+            [DataMember(Name = "games")]
+            public OwnedGameEntry[] Games { get; set; }
+        }
+
+        [DataContract]
+        private sealed class OwnedGameEntry
+        {
+            [DataMember(Name = "appid")]
+            public uint AppId { get; set; }
+
+            [DataMember(Name = "name")]
+            public string Name { get; set; }
+        }
+
         [DataContract]
         private sealed class PickerPreferences
         {
@@ -174,6 +221,47 @@ namespace SAM.Picker
 
             [DataMember(Name = "sort_mode")]
             public string SortMode { get; set; }
+        }
+
+        [DataContract]
+        private sealed class AchievementStatusDatabase
+        {
+            [DataMember(Name = "generated_utc")]
+            public string GeneratedUtc { get; set; }
+
+            [DataMember(Name = "steam_id")]
+            public ulong SteamId { get; set; }
+
+            [DataMember(Name = "scan_mode")]
+            public string ScanMode { get; set; }
+
+            [DataMember(Name = "games")]
+            public AchievementStatusEntry[] Games { get; set; }
+        }
+
+        [DataContract]
+        private sealed class AchievementStatusEntry
+        {
+            [DataMember(Name = "app_id")]
+            public uint AppId { get; set; }
+
+            [DataMember(Name = "name")]
+            public string Name { get; set; }
+
+            [DataMember(Name = "type")]
+            public string Type { get; set; }
+
+            [DataMember(Name = "achievement_unlocked")]
+            public int AchievementUnlocked { get; set; }
+
+            [DataMember(Name = "achievement_total")]
+            public int AchievementTotal { get; set; }
+
+            [DataMember(Name = "has_progress")]
+            public bool HasProgress { get; set; }
+
+            [DataMember(Name = "has_incomplete_achievements")]
+            public bool HasIncompleteAchievements { get; set; }
         }
 
         public GamePicker(API.Client client)
@@ -232,6 +320,72 @@ namespace SAM.Picker
 
         private void DoDownloadList(object sender, DoWorkEventArgs e)
         {
+            this._PickerStatusLabel.Text = "Downloading owned game list...";
+
+            var steamId = this._SteamClient.SteamUser.GetSteamId();
+            Dictionary<uint, OwnedGameInfo> mergedOwnedGames = new();
+            bool hasAuthoritativeOwnedGames = false;
+
+            if (string.IsNullOrWhiteSpace(this._SteamWebApiKey) == false &&
+                TryDownloadOwnedGamesFromWebApi(steamId, this._SteamWebApiKey, out var webApiGames) == true)
+            {
+                this._PickerStatusLabel.Text = "Merging owned games from Steam Web API...";
+                MergeOwnedGameInfos(mergedOwnedGames, webApiGames);
+                hasAuthoritativeOwnedGames = true;
+            }
+
+            if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
+                TryDownloadOwnedGamesFromCommunity(steamId, this._SteamCommunityCookies, out var communityGames) == true)
+            {
+                this._PickerStatusLabel.Text = "Merging owned games from Steam Community...";
+                MergeOwnedGameInfos(mergedOwnedGames, communityGames);
+            }
+
+            if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
+                TryDownloadOwnedGamesFromCommunityHtml(steamId, this._SteamCommunityCookies, out var communityHtmlGames) == true)
+            {
+                this._PickerStatusLabel.Text = "Merging owned games from Steam Community HTML...";
+                MergeOwnedGameInfos(mergedOwnedGames, communityHtmlGames);
+            }
+
+            if (mergedOwnedGames.Count > 0)
+            {
+                this._PickerStatusLabel.Text = "Loading merged owned games...";
+                foreach (var game in mergedOwnedGames.Values
+                             .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+                             .ThenBy(item => item.AppId))
+                {
+                    var info = this.AddOwnedGame(game.AppId, "normal", game.Name);
+                    ApplyOwnedGameProgress(info, game);
+                }
+
+                AppendAchievementScanLog(0, $"Merged owned game list contains {mergedOwnedGames.Count} apps.");
+
+                if (hasAuthoritativeOwnedGames == false)
+                {
+                    this._PickerStatusLabel.Text = "Checking local ownership for additional games...";
+                    if (TryDownloadGamesXml(out var supplementalPairs) == false)
+                    {
+                        AppendAchievementScanLog(0, "Failed to download games.xml for supplemental ownership check. Trying ISteamApps/GetAppList.");
+                        TryDownloadAppListFromSteam(out supplementalPairs);
+                    }
+
+                    if (supplementalPairs != null && supplementalPairs.Count > 0)
+                    {
+                        int supplementalStartCount = this._Games.Count;
+                        foreach (var kv in supplementalPairs)
+                        {
+                            this.AddGame(kv.Key, kv.Value);
+                        }
+
+                        int supplementalAdded = this._Games.Count - supplementalStartCount;
+                        AppendAchievementScanLog(0, $"Supplemental ownership filter added {supplementalAdded} games from {supplementalPairs.Count} candidates.");
+                    }
+                }
+
+                return;
+            }
+
             this._PickerStatusLabel.Text = "Downloading game list...";
 
             if (TryDownloadGamesXml(out var pairs) == false)
@@ -246,9 +400,68 @@ namespace SAM.Picker
             }
 
             this._PickerStatusLabel.Text = "Checking game ownership...";
+            int startCount = this._Games.Count;
             foreach (var kv in pairs)
             {
                 this.AddGame(kv.Key, kv.Value);
+            }
+            int added = this._Games.Count - startCount;
+            AppendAchievementScanLog(0, $"Ownership filter added {added} games from {pairs.Count} candidates.");
+        }
+
+        private static void MergeOwnedGameInfos(
+            IDictionary<uint, OwnedGameInfo> destination,
+            IEnumerable<OwnedGameInfo> source)
+        {
+            if (destination == null || source == null)
+            {
+                return;
+            }
+
+            foreach (var item in source)
+            {
+                if (item == null || item.AppId == 0)
+                {
+                    continue;
+                }
+
+                if (destination.TryGetValue(item.AppId, out var existing) == false)
+                {
+                    destination[item.AppId] = new OwnedGameInfo()
+                    {
+                        AppId = item.AppId,
+                        Name = item.Name,
+                        HasStatsLink = item.HasStatsLink,
+                        AchievementUnlocked = item.AchievementUnlocked,
+                        AchievementTotal = item.AchievementTotal,
+                    };
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.Name) == true &&
+                    string.IsNullOrWhiteSpace(item.Name) == false)
+                {
+                    existing.Name = item.Name;
+                }
+
+                if (item.HasStatsLink == true)
+                {
+                    existing.HasStatsLink = true;
+                }
+
+                if (item.HasAchievementProgress == false)
+                {
+                    continue;
+                }
+
+                if (existing.HasAchievementProgress == false ||
+                    item.AchievementTotal > existing.AchievementTotal ||
+                    (item.AchievementTotal == existing.AchievementTotal &&
+                     item.AchievementUnlocked > existing.AchievementUnlocked))
+                {
+                    existing.AchievementUnlocked = item.AchievementUnlocked;
+                    existing.AchievementTotal = item.AchievementTotal;
+                }
             }
         }
 
@@ -356,6 +569,560 @@ namespace SAM.Picker
             }
         }
 
+        private static bool TryDownloadOwnedGamesFromWebApi(
+            ulong steamId,
+            string steamWebApiKey,
+            out List<OwnedGameInfo> games)
+        {
+            games = null;
+            if (string.IsNullOrWhiteSpace(steamWebApiKey) == true)
+            {
+                return false;
+            }
+
+            string url =
+                $"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key={Uri.EscapeDataString(steamWebApiKey)}&steamid={steamId}&include_appinfo=1&include_played_free_games=1";
+
+            try
+            {
+                AppendAchievementScanLog(0, $"HTTP GET {url}");
+
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                request.Timeout = 12000;
+                request.ReadWriteTimeout = 12000;
+                request.UserAgent = "SteamAchievementManager";
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+
+                using var response = (HttpWebResponse)request.GetResponse();
+                using var stream = response.GetResponseStream();
+                if (stream == null)
+                {
+                    AppendAchievementScanLog(0, "GetOwnedGames returned no content.");
+                    return false;
+                }
+
+                DataContractJsonSerializer serializer = new(typeof(OwnedGamesResponse));
+                if (serializer.ReadObject(stream) is not OwnedGamesResponse payload ||
+                    payload.Response?.Games == null ||
+                    payload.Response.Games.Length == 0)
+                {
+                    AppendAchievementScanLog(0, "GetOwnedGames returned empty payload.");
+                    return false;
+                }
+
+                games = payload.Response.Games
+                    .Where(entry => entry != null && entry.AppId > 0)
+                    .Select(entry => new OwnedGameInfo()
+                    {
+                        AppId = entry.AppId,
+                        Name = entry.Name,
+                        HasStatsLink = true,
+                    })
+                    .ToList();
+
+                AppendAchievementScanLog(0, $"GetOwnedGames returned {games.Count} owned apps.");
+                return games.Count > 0;
+            }
+            catch (WebException ex)
+            {
+                if (TryReadWebExceptionBody(ex, out var body) == true)
+                {
+                    AppendAchievementScanLog(0, $"GetOwnedGames request failed: {body}");
+                }
+                else
+                {
+                    AppendAchievementScanLog(0, $"GetOwnedGames request failed: {ex.Message}");
+                }
+                return false;
+            }
+            catch (SerializationException ex)
+            {
+                AppendAchievementScanLog(0, $"GetOwnedGames JSON parse failed: {ex.Message}");
+                return false;
+            }
+            catch (InvalidCastException ex)
+            {
+                AppendAchievementScanLog(0, $"GetOwnedGames response cast failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool TryDownloadOwnedGamesFromCommunity(
+            ulong steamId,
+            Dictionary<string, string> cookies,
+            out List<OwnedGameInfo> games)
+        {
+            games = null;
+            if (cookies == null || cookies.Count == 0)
+            {
+                return false;
+            }
+
+            string url = $"https://steamcommunity.com/profiles/{steamId}/games/?tab=all&xml=1";
+            try
+            {
+                AppendAchievementScanLog(0, $"HTTP GET {url}");
+
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                request.Timeout = 12000;
+                request.ReadWriteTimeout = 12000;
+                request.UserAgent = "SteamAchievementManager";
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+
+                using var response = (HttpWebResponse)request.GetResponse();
+                using var stream = response.GetResponseStream();
+                if (stream == null)
+                {
+                    AppendAchievementScanLog(0, "Community owned games endpoint returned no content.");
+                    return false;
+                }
+
+                string payload;
+                using (StreamReader reader = new(stream, Encoding.UTF8))
+                {
+                    payload = reader.ReadToEnd();
+                }
+
+                if (string.IsNullOrWhiteSpace(payload) == true)
+                {
+                    AppendAchievementScanLog(0, "Community owned games endpoint returned empty content.");
+                    return false;
+                }
+
+                string trimmed = payload.TrimStart();
+                if (trimmed.StartsWith("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) == true ||
+                    trimmed.StartsWith("<html", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    AppendAchievementScanLog(0, "Community owned games endpoint returned HTML (authentication required or invalid cookies).");
+                    return false;
+                }
+
+                using StringReader stringReader = new(payload);
+                XPathDocument document = new(stringReader);
+                var navigator = document.CreateNavigator();
+                var nodes = navigator.Select("/gamesList/games/game");
+                if (nodes.Count == 0)
+                {
+                    nodes = navigator.Select("//games/game");
+                }
+
+                List<OwnedGameInfo> items = new();
+                while (nodes.MoveNext() == true)
+                {
+                    string appIdText = nodes.Current.SelectSingleNode("appID")?.Value ??
+                                       nodes.Current.SelectSingleNode("appid")?.Value;
+                    if (uint.TryParse(appIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint appId) == false ||
+                        appId == 0)
+                    {
+                        continue;
+                    }
+
+                    string name = nodes.Current.SelectSingleNode("name")?.Value;
+                    string statsLink = nodes.Current.SelectSingleNode("statsLink")?.Value ??
+                                       nodes.Current.SelectSingleNode("statslink")?.Value;
+                    items.Add(new OwnedGameInfo()
+                    {
+                        AppId = appId,
+                        Name = name,
+                        HasStatsLink = string.IsNullOrWhiteSpace(statsLink) == false,
+                    });
+                }
+
+                games = items
+                    .GroupBy(item => item.AppId)
+                    .Select(group => group.First())
+                    .ToList();
+
+                AppendAchievementScanLog(0, $"Community games XML returned {games.Count} owned apps.");
+                return games.Count > 0;
+            }
+            catch (WebException ex)
+            {
+                if (TryReadWebExceptionBody(ex, out var body) == true)
+                {
+                    AppendAchievementScanLog(0, $"Community owned games request failed: {body}");
+                }
+                else
+                {
+                    AppendAchievementScanLog(0, $"Community owned games request failed: {ex.Message}");
+                }
+                return false;
+            }
+            catch (XPathException ex)
+            {
+                AppendAchievementScanLog(0, $"Community owned games XML parse failed: {ex.Message}");
+                return false;
+            }
+            catch (XmlException ex)
+            {
+                AppendAchievementScanLog(0, $"Community owned games XML parse failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool TryDownloadOwnedGamesFromCommunityHtml(
+            ulong steamId,
+            Dictionary<string, string> cookies,
+            out List<OwnedGameInfo> games)
+        {
+            games = null;
+            if (cookies == null || cookies.Count == 0)
+            {
+                return false;
+            }
+
+            string url = $"https://steamcommunity.com/profiles/{steamId}/games?tab=all&sort=achievements";
+            try
+            {
+                AppendAchievementScanLog(0, $"HTTP GET {url}");
+
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                request.Timeout = 12000;
+                request.ReadWriteTimeout = 12000;
+                request.UserAgent = "SteamAchievementManager";
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+
+                using var response = (HttpWebResponse)request.GetResponse();
+                using var stream = response.GetResponseStream();
+                if (stream == null)
+                {
+                    AppendAchievementScanLog(0, "Community games HTML endpoint returned no content.");
+                    return false;
+                }
+
+                string html;
+                using (StreamReader reader = new(stream, Encoding.UTF8))
+                {
+                    html = reader.ReadToEnd();
+                }
+
+                if (string.IsNullOrWhiteSpace(html) == true)
+                {
+                    AppendAchievementScanLog(0, "Community games HTML endpoint returned empty content.");
+                    return false;
+                }
+
+                if (html.IndexOf("<title>Sign In", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    AppendAchievementScanLog(0, "Community games HTML endpoint returned sign-in page (invalid or expired cookies).");
+                    return false;
+                }
+
+                if (TryExtractGamesFromCommunityHtml(html, out games) == false)
+                {
+                    AppendAchievementScanLog(0, "Community games HTML parser could not extract rgGames payload.");
+                    return false;
+                }
+
+                AppendAchievementScanLog(0, $"Community games HTML returned {games.Count} owned apps.");
+                return games.Count > 0;
+            }
+            catch (WebException ex)
+            {
+                if (TryReadWebExceptionBody(ex, out var body) == true)
+                {
+                    AppendAchievementScanLog(0, $"Community games HTML request failed: {body}");
+                }
+                else
+                {
+                    AppendAchievementScanLog(0, $"Community games HTML request failed: {ex.Message}");
+                }
+                return false;
+            }
+        }
+
+        private static bool TryExtractGamesFromCommunityHtml(string html, out List<OwnedGameInfo> games)
+        {
+            games = null;
+
+            if (TryExtractJsonArrayAfterMarker(html, "var rgGames =", out var json) == false &&
+                TryExtractJsonArrayAfterMarker(html, "rgGames =", out json) == false &&
+                TryExtractJsonArrayAfterMarker(html, "g_rgGames =", out json) == false)
+            {
+                return false;
+            }
+
+            JavaScriptSerializer serializer = new()
+            {
+                MaxJsonLength = int.MaxValue,
+            };
+
+            object parsed;
+            try
+            {
+                parsed = serializer.DeserializeObject(json);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            if (parsed is not object[] entries || entries.Length == 0)
+            {
+                return false;
+            }
+
+            List<OwnedGameInfo> items = new();
+            foreach (var entry in entries)
+            {
+                if (entry is not Dictionary<string, object> map)
+                {
+                    continue;
+                }
+
+                if (TryReadUInt(map, "appid", out uint appId) == false || appId == 0)
+                {
+                    continue;
+                }
+
+                var item = new OwnedGameInfo()
+                {
+                    AppId = appId,
+                    Name = ReadString(map, "name"),
+                    HasStatsLink = HasAchievementsLink(map),
+                };
+
+                if (TryReadAchievementCounts(map, out int unlocked, out int total) == true)
+                {
+                    item.AchievementUnlocked = unlocked;
+                    item.AchievementTotal = total;
+                }
+                else if (TryParseAchievementCountsFromText(ReadString(map, "achievements"), out unlocked, out total) == true)
+                {
+                    item.AchievementUnlocked = unlocked;
+                    item.AchievementTotal = total;
+                }
+
+                if (item.HasAchievementProgress == false &&
+                    item.HasStatsLink == false)
+                {
+                    item.AchievementUnlocked = 0;
+                    item.AchievementTotal = 0;
+                }
+
+                items.Add(item);
+            }
+
+            games = items
+                .GroupBy(item => item.AppId)
+                .Select(group => group.First())
+                .ToList();
+            return games.Count > 0;
+        }
+
+        private static bool TryExtractJsonArrayAfterMarker(string input, string marker, out string json)
+        {
+            json = null;
+            if (string.IsNullOrEmpty(input) == true || string.IsNullOrEmpty(marker) == true)
+            {
+                return false;
+            }
+
+            int markerIndex = input.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                return false;
+            }
+
+            int arrayStart = input.IndexOf('[', markerIndex);
+            if (arrayStart < 0)
+            {
+                return false;
+            }
+
+            int depth = 0;
+            bool inString = false;
+            bool escaping = false;
+            for (int i = arrayStart; i < input.Length; i++)
+            {
+                char ch = input[i];
+
+                if (inString == true)
+                {
+                    if (escaping == true)
+                    {
+                        escaping = false;
+                    }
+                    else if (ch == '\\')
+                    {
+                        escaping = true;
+                    }
+                    else if (ch == '"')
+                    {
+                        inString = false;
+                    }
+
+                    continue;
+                }
+
+                if (ch == '"')
+                {
+                    inString = true;
+                    continue;
+                }
+
+                if (ch == '[')
+                {
+                    depth++;
+                }
+                else if (ch == ']')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        json = input.Substring(arrayStart, i - arrayStart + 1);
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasAchievementsLink(IDictionary<string, object> map)
+        {
+            if (map.TryGetValue("availStatLinks", out var value) == false ||
+                value is not Dictionary<string, object> links)
+            {
+                return false;
+            }
+
+            return links.ContainsKey("achievements");
+        }
+
+        private static bool TryReadAchievementCounts(
+            IDictionary<string, object> map,
+            out int unlocked,
+            out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            if (TryReadInt(map, "achievements_unlocked", out unlocked) == true &&
+                TryReadInt(map, "achievements_total", out total) == true &&
+                unlocked >= 0 &&
+                total >= 0)
+            {
+                return true;
+            }
+
+            if (TryReadInt(map, "unlocked_achievements", out unlocked) == true &&
+                TryReadInt(map, "total_achievements", out total) == true &&
+                unlocked >= 0 &&
+                total >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryReadInt(IDictionary<string, object> map, string key, out int value)
+        {
+            value = -1;
+            if (map.TryGetValue(key, out var raw) == false || raw == null)
+            {
+                return false;
+            }
+
+            switch (raw)
+            {
+                case int i:
+                    value = i;
+                    return true;
+                case long l:
+                    if (l < int.MinValue || l > int.MaxValue)
+                    {
+                        return false;
+                    }
+                    value = (int)l;
+                    return true;
+                case double d:
+                    if (d < int.MinValue || d > int.MaxValue)
+                    {
+                        return false;
+                    }
+                    value = (int)d;
+                    return true;
+                case string s:
+                    return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryReadUInt(IDictionary<string, object> map, string key, out uint value)
+        {
+            value = 0;
+            if (map.TryGetValue(key, out var raw) == false || raw == null)
+            {
+                return false;
+            }
+
+            switch (raw)
+            {
+                case uint u:
+                    value = u;
+                    return true;
+                case int i when i >= 0:
+                    value = (uint)i;
+                    return true;
+                case long l when l >= 0 && l <= uint.MaxValue:
+                    value = (uint)l;
+                    return true;
+                case double d when d >= 0 && d <= uint.MaxValue:
+                    value = (uint)d;
+                    return true;
+                case string s:
+                    return uint.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+                default:
+                    return false;
+            }
+        }
+
+        private static string ReadString(IDictionary<string, object> map, string key)
+        {
+            if (map.TryGetValue(key, out var raw) == false || raw == null)
+            {
+                return null;
+            }
+
+            return WebUtility.HtmlDecode(raw.ToString());
+        }
+
+        private static bool TryParseAchievementCountsFromText(
+            string text,
+            out int unlocked,
+            out int total)
+        {
+            unlocked = -1;
+            total = -1;
+            if (string.IsNullOrWhiteSpace(text) == true)
+            {
+                return false;
+            }
+
+            Match slashMatch = Regex.Match(text, @"(\d+)\s*/\s*(\d+)");
+            if (slashMatch.Success == true &&
+                int.TryParse(slashMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
+                int.TryParse(slashMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true)
+            {
+                return true;
+            }
+
+            Match ofMatch = Regex.Match(text, @"(\d+)\s+of\s+(\d+)", RegexOptions.IgnoreCase);
+            if (ofMatch.Success == true &&
+                int.TryParse(ofMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
+                int.TryParse(ofMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private void OnDownloadList(object sender, RunWorkerCompletedEventArgs e)
         {
             if (e.Error != null || e.Cancelled == true)
@@ -430,11 +1197,7 @@ namespace SAM.Picker
             string message = $"Displaying {this._FilteredGames.Count} games. Total {this._Games.Count} games.";
             if (this._AchievementWorker.IsBusy == true)
             {
-                string mode = string.IsNullOrEmpty(this._SteamWebApiKey) == false
-                    ? "web-api"
-                    : (this._SteamCommunityCookies?.Count ?? 0) > 0
-                        ? "community-auth"
-                        : "community";
+                string mode = this.GetActiveScanModeLabel();
                 message += $" Checking achievements ({mode}) {this._AchievementScanCompleted}/{this._AchievementScanTotal}...";
             }
             else if (this._FilterIncompleteAchievementsMenuItem.Checked == true &&
@@ -447,6 +1210,20 @@ namespace SAM.Picker
 
             this._PickerStatusLabel.Text = message;
             this.UpdateLoadingIndicator();
+        }
+
+        private string GetActiveScanModeLabel()
+        {
+            if (this._CurrentAchievementScanMode == AchievementScanMode.LocalCheckAll)
+            {
+                return "local-check-all";
+            }
+
+            return string.IsNullOrEmpty(this._SteamWebApiKey) == false
+                ? "web-api"
+                : (this._SteamCommunityCookies?.Count ?? 0) > 0
+                    ? "community-auth"
+                    : "community";
         }
 
         private void UpdateLoadingIndicator()
@@ -628,6 +1405,79 @@ namespace SAM.Picker
             return cookies.Count > 0 ? cookies : null;
         }
 
+        private void OnConfigureAuth(object sender, EventArgs e)
+        {
+            using SteamCommunityAuthDialog dialog = new(this._SteamCommunityCookies);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            Dictionary<string, string> cookies = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["sessionid"] = dialog.SessionId.Trim(),
+                ["steamLoginSecure"] = dialog.SteamLoginSecure.Trim(),
+            };
+
+            if (string.IsNullOrWhiteSpace(dialog.SteamParental) == false)
+            {
+                cookies["steamParental"] = dialog.SteamParental.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(dialog.SteamMachineAuth) == false)
+            {
+                cookies["steamMachineAuth"] = dialog.SteamMachineAuth.Trim();
+            }
+
+            this._SteamCommunityCookies = cookies;
+
+            if (dialog.SaveToFile == true)
+            {
+                SaveSteamCommunityCookies(this._SteamCommunityCookies);
+            }
+
+            this.AddGames();
+        }
+
+        private static void SaveSteamCommunityCookies(IDictionary<string, string> cookies)
+        {
+            if (cookies == null || cookies.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                StringBuilder builder = new();
+                foreach (var pair in cookies)
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) == true ||
+                        string.IsNullOrWhiteSpace(pair.Value) == true)
+                    {
+                        continue;
+                    }
+
+                    builder.Append(pair.Key.Trim());
+                    builder.Append('=');
+                    builder.AppendLine(pair.Value.Trim());
+                }
+
+                if (builder.Length == 0)
+                {
+                    return;
+                }
+
+                var path = Path.Combine(Application.StartupPath, "steam-community-cookies.txt");
+                File.WriteAllText(path, builder.ToString(), Encoding.UTF8);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
         private static void AddSteamCommunityCookieFromEnvironment(
             IDictionary<string, string> cookies,
             string cookieName,
@@ -645,6 +1495,64 @@ namespace SAM.Picker
         private static string GetPickerPreferencesPath()
         {
             return Path.Combine(Application.StartupPath, "sam-picker-preferences.json");
+        }
+
+        private static string GetAchievementStatusDatabasePath()
+        {
+            return Path.Combine(Application.StartupPath, "data", "games", "achievements", "status.json");
+        }
+
+        private void SaveAchievementStatusDatabase()
+        {
+            try
+            {
+                string path = GetAchievementStatusDatabasePath();
+                string directory = Path.GetDirectoryName(path);
+                if (string.IsNullOrEmpty(directory) == false)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                AchievementStatusEntry[] entries = this._Games.Values
+                    .OrderBy(game => game.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Select(game => new AchievementStatusEntry()
+                    {
+                        AppId = game.Id,
+                        Name = game.Name,
+                        Type = game.Type,
+                        AchievementUnlocked = game.AchievementUnlocked,
+                        AchievementTotal = game.AchievementTotal,
+                        HasProgress = game.HasAchievementProgress,
+                        HasIncompleteAchievements = game.HasIncompleteAchievements,
+                    })
+                    .ToArray();
+
+                AchievementStatusDatabase payload = new()
+                {
+                    GeneratedUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                    SteamId = this._SteamClient.SteamUser.GetSteamId(),
+                    ScanMode = this.GetActiveScanModeLabel(),
+                    Games = entries,
+                };
+
+                using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                serializer.WriteObject(stream, payload);
+
+                AppendAchievementScanLog(0, $"Saved achievement database to {path}.");
+            }
+            catch (IOException ex)
+            {
+                AppendAchievementScanLog(0, $"Failed to save achievement database: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                AppendAchievementScanLog(0, $"Failed to save achievement database: {ex.Message}");
+            }
+            catch (SerializationException ex)
+            {
+                AppendAchievementScanLog(0, $"Failed to serialize achievement database: {ex.Message}");
+            }
         }
 
         private void LoadPickerPreferences()
@@ -850,11 +1758,62 @@ namespace SAM.Picker
             this._AchievementScanPending = false;
             this._AchievementScanCompleted = 0;
             this._AchievementScanTotal = gameIds.Count;
+            this._CurrentAchievementScanMode = AchievementScanMode.Auto;
             this.UpdatePickerStatus();
 
             var steamId = this._SteamClient.SteamUser.GetSteamId();
             this._AchievementWorker.RunWorkerAsync(
-                new AchievementScanRequest(gameIds, steamId, this._SteamWebApiKey, this._SteamCommunityCookies));
+                new AchievementScanRequest(
+                    gameIds,
+                    steamId,
+                    this._SteamWebApiKey,
+                    this._SteamCommunityCookies,
+                    AchievementScanMode.Auto));
+            this.UpdateLoadingIndicator();
+        }
+
+        private void StartCheckAllScan()
+        {
+            if (this._AchievementWorker.IsBusy == true)
+            {
+                MessageBox.Show(
+                    this,
+                    "Achievement scanning is already in progress.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var gameIds = this._Games.Values
+                .Select(info => info.Id)
+                .Distinct()
+                .ToList();
+            if (gameIds.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No games are available to scan.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            this._AchievementScanPending = false;
+            this._AchievementScanCompleted = 0;
+            this._AchievementScanTotal = gameIds.Count;
+            this._CurrentAchievementScanMode = AchievementScanMode.LocalCheckAll;
+            this.UpdatePickerStatus();
+
+            var steamId = this._SteamClient.SteamUser.GetSteamId();
+            this._AchievementWorker.RunWorkerAsync(
+                new AchievementScanRequest(
+                    gameIds,
+                    steamId,
+                    this._SteamWebApiKey,
+                    this._SteamCommunityCookies,
+                    AchievementScanMode.LocalCheckAll));
             this.UpdateLoadingIndicator();
         }
 
@@ -867,6 +1826,12 @@ namespace SAM.Picker
 
             if (sender is not BackgroundWorker worker)
             {
+                return;
+            }
+
+            if (request.Mode == AchievementScanMode.LocalCheckAll)
+            {
+                DoScanAchievementsWithLocalProcess(worker, e, request);
                 return;
             }
 
@@ -916,6 +1881,34 @@ namespace SAM.Picker
             if (worker.CancellationPending == true)
             {
                 e.Cancel = true;
+            }
+        }
+
+        private static void DoScanAchievementsWithLocalProcess(
+            BackgroundWorker worker,
+            DoWorkEventArgs e,
+            AchievementScanRequest request)
+        {
+            int completed = 0;
+            foreach (var gameId in request.GameIds)
+            {
+                if (worker.CancellationPending == true)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                if (TryGetAchievementProgressFromLocalProcess(
+                        gameId,
+                        out int unlocked,
+                        out int total) == false)
+                {
+                    unlocked = -1;
+                    total = -1;
+                }
+
+                int progress = Interlocked.Increment(ref completed);
+                worker.ReportProgress(progress, new AchievementScanProgress(gameId, unlocked, total));
             }
         }
 
@@ -1002,6 +1995,118 @@ namespace SAM.Picker
             {
                 this.StartAchievementScan();
             }
+
+            this.SaveAchievementStatusDatabase();
+            this._CurrentAchievementScanMode = AchievementScanMode.Auto;
+            this.UpdatePickerStatus();
+        }
+
+        private static bool TryGetAchievementProgressFromLocalProcess(
+            uint gameId,
+            out int unlocked,
+            out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            string arguments = _($"--achievement-progress {gameId.ToString(CultureInfo.InvariantCulture)}");
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = "SAM.Game.exe",
+                Arguments = arguments,
+                WorkingDirectory = Application.StartupPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+
+            try
+            {
+                AppendAchievementScanLog(gameId, $"PROCESS SAM.Game.exe {arguments}");
+                using Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    AppendAchievementScanLog(gameId, "Local process did not start.");
+                    return false;
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+                if (process.WaitForExit(25000) == false)
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+
+                    AppendAchievementScanLog(gameId, "Local process timed out.");
+                    return false;
+                }
+
+                if (TryParseLocalProcessOutput(stdout, out unlocked, out total) == true)
+                {
+                    AppendAchievementScanLog(gameId, $"Local process progress {unlocked}/{total}.");
+                    return true;
+                }
+
+                string reason = string.IsNullOrWhiteSpace(stderr) == false ? stderr.Trim() : stdout.Trim();
+                if (string.IsNullOrWhiteSpace(reason) == false)
+                {
+                    AppendAchievementScanLog(gameId, $"Local process failed: {reason}");
+                }
+                else
+                {
+                    AppendAchievementScanLog(gameId, _($"Local process exited with code {process.ExitCode}."));
+                }
+                return false;
+            }
+            catch (Win32Exception ex)
+            {
+                AppendAchievementScanLog(gameId, $"Local process start failed: {ex.Message}");
+                return false;
+            }
+            catch (InvalidOperationException ex)
+            {
+                AppendAchievementScanLog(gameId, $"Local process failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool TryParseLocalProcessOutput(string output, out int unlocked, out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            if (string.IsNullOrWhiteSpace(output) == true)
+            {
+                return false;
+            }
+
+            string[] lines = output
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length == 0)
+            {
+                return false;
+            }
+
+            string lastLine = lines[lines.Length - 1].Trim();
+            if (lastLine.StartsWith("ERR", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return false;
+            }
+
+            string[] parts = lastLine.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                return false;
+            }
+
+            return int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
+                   int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true;
         }
 
         private static bool TryGetAchievementProgressFromWebApi(
@@ -1258,6 +2363,15 @@ namespace SAM.Picker
         private static CookieContainer CreateSteamCommunityCookieContainer(IDictionary<string, string> cookies)
         {
             CookieContainer container = new();
+            string loginSecure = null;
+            if (cookies != null &&
+                cookies.TryGetValue("steamLoginSecure", out var value) == true &&
+                string.IsNullOrWhiteSpace(value) == false)
+            {
+                loginSecure = value.Trim();
+            }
+
+            string machineAuthCookieName = GetSteamMachineAuthCookieName(loginSecure);
             foreach (var pair in cookies)
             {
                 if (string.IsNullOrWhiteSpace(pair.Key) == true ||
@@ -1266,7 +2380,14 @@ namespace SAM.Picker
                     continue;
                 }
 
-                var cookie = new Cookie(pair.Key.Trim(), pair.Value.Trim(), "/", ".steamcommunity.com")
+                string cookieName = pair.Key.Trim();
+                if (string.Equals(cookieName, "steamMachineAuth", StringComparison.OrdinalIgnoreCase) == true &&
+                    string.Equals(machineAuthCookieName, "steamMachineAuth", StringComparison.OrdinalIgnoreCase) == false)
+                {
+                    cookieName = machineAuthCookieName;
+                }
+
+                var cookie = new Cookie(cookieName, pair.Value.Trim(), "/", "steamcommunity.com")
                 {
                     Secure = true,
                 };
@@ -1275,16 +2396,61 @@ namespace SAM.Picker
             return container;
         }
 
+        private static string GetSteamMachineAuthCookieName(string steamLoginSecure)
+        {
+            if (string.IsNullOrWhiteSpace(steamLoginSecure) == true)
+            {
+                return "steamMachineAuth";
+            }
+
+            string decoded = WebUtility.UrlDecode(steamLoginSecure);
+            int separator = decoded.IndexOf('|');
+            if (separator > 0)
+            {
+                decoded = decoded.Substring(0, separator);
+            }
+
+            if (decoded.Length >= 17)
+            {
+                return "steamMachineAuth" + decoded.Substring(0, 17);
+            }
+
+            return "steamMachineAuth";
+        }
+
         private static void AppendAchievementScanLog(uint gameId, string message)
         {
             try
             {
-                var path = Path.Combine(Application.StartupPath, "sam-picker-scan.log");
+                var path = GetAchievementScanLogPath();
                 string sanitized = RedactSensitiveContent(message);
                 string line = _($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] App {gameId}: {sanitized}{Environment.NewLine}");
                 lock (_ScanLogLock)
                 {
                     File.AppendAllText(path, line, Encoding.UTF8);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        private static string GetAchievementScanLogPath()
+        {
+            return Path.Combine(Application.StartupPath, "sam-picker-scan.log");
+        }
+
+        private static void ClearAchievementScanLog()
+        {
+            try
+            {
+                string path = GetAchievementScanLogPath();
+                lock (_ScanLogLock)
+                {
+                    using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.Read);
                 }
             }
             catch (IOException)
@@ -1487,6 +2653,48 @@ namespace SAM.Picker
             return this._SteamClient.SteamApps008.IsSubscribedApp(id);
         }
 
+        private static void ApplyOwnedGameProgress(GameInfo info, OwnedGameInfo game)
+        {
+            if (info == null || game == null)
+            {
+                return;
+            }
+
+            if (game.HasAchievementProgress == true)
+            {
+                info.AchievementUnlocked = game.AchievementUnlocked;
+                info.AchievementTotal = game.AchievementTotal;
+                return;
+            }
+
+            if (game.HasStatsLink == false)
+            {
+                info.AchievementUnlocked = 0;
+                info.AchievementTotal = 0;
+            }
+        }
+
+        private GameInfo AddOwnedGame(uint id, string type, string explicitName)
+        {
+            if (this._Games.TryGetValue(id, out var existing) == true)
+            {
+                return existing;
+            }
+
+            GameInfo info = new(id, type);
+            if (string.IsNullOrWhiteSpace(explicitName) == false)
+            {
+                info.Name = explicitName.Trim();
+            }
+            else
+            {
+                info.Name = this._SteamClient.SteamApps001.GetAppData(info.Id, "name");
+            }
+
+            this._Games.Add(id, info);
+            return info;
+        }
+
         private void AddGame(uint id, string type)
         {
             if (this._Games.ContainsKey(id) == true)
@@ -1499,13 +2707,12 @@ namespace SAM.Picker
                 return;
             }
 
-            GameInfo info = new(id, type);
-            info.Name = this._SteamClient.SteamApps001.GetAppData(info.Id, "name");
-            this._Games.Add(id, info);
+            this.AddOwnedGame(id, type, null);
         }
 
         private void AddGames()
         {
+            ClearAchievementScanLog();
             this._AchievementScanPending = false;
             if (this._AchievementWorker.IsBusy == true)
             {
@@ -1566,6 +2773,33 @@ namespace SAM.Picker
         {
             this._AddGameTextBox.Text = "";
             this.AddGames();
+        }
+
+        private void OnCheckAllAchievements(object sender, EventArgs e)
+        {
+            if (this._Games.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No games are loaded yet.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                this,
+                "Check All will scan every game sequentially and may take a long time. Continue?",
+                "Check All",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            this.StartCheckAllScan();
         }
 
         private void OnAddGame(object sender, EventArgs e)
@@ -1659,7 +2893,7 @@ namespace SAM.Picker
 
         private void OnShowLogs(object sender, EventArgs e)
         {
-            string path = Path.Combine(Application.StartupPath, "sam-picker-scan.log");
+            string path = GetAchievementScanLogPath();
             try
             {
                 if (File.Exists(path) == false)

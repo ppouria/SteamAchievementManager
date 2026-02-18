@@ -28,6 +28,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Windows.Forms;
 using static SAM.Game.InvariantShorthand;
 using APITypes = SAM.API.Types;
@@ -51,6 +53,47 @@ namespace SAM.Game
         private readonly API.Callbacks.UserStatsReceived _UserStatsReceivedCallback;
 
         //private API.Callback<APITypes.UserStatsStored> UserStatsStoredCallback;
+
+        [DataContract]
+        private sealed class AchievementStatusDatabase
+        {
+            [DataMember(Name = "generated_utc")]
+            public string GeneratedUtc { get; set; }
+
+            [DataMember(Name = "steam_id")]
+            public ulong SteamId { get; set; }
+
+            [DataMember(Name = "scan_mode")]
+            public string ScanMode { get; set; }
+
+            [DataMember(Name = "games")]
+            public AchievementStatusEntry[] Games { get; set; }
+        }
+
+        [DataContract]
+        private sealed class AchievementStatusEntry
+        {
+            [DataMember(Name = "app_id")]
+            public uint AppId { get; set; }
+
+            [DataMember(Name = "name")]
+            public string Name { get; set; }
+
+            [DataMember(Name = "type")]
+            public string Type { get; set; }
+
+            [DataMember(Name = "achievement_unlocked")]
+            public int AchievementUnlocked { get; set; }
+
+            [DataMember(Name = "achievement_total")]
+            public int AchievementTotal { get; set; }
+
+            [DataMember(Name = "has_progress")]
+            public bool HasProgress { get; set; }
+
+            [DataMember(Name = "has_incomplete_achievements")]
+            public bool HasIncompleteAchievements { get; set; }
+        }
 
         public Manager(long gameId, API.Client client)
         {
@@ -741,6 +784,156 @@ namespace SAM.Game
             return true;
         }
 
+        private static string GetAchievementStatusDatabasePath()
+        {
+            return Path.Combine(Application.StartupPath, "data", "games", "achievements", "status.json");
+        }
+
+        private bool TryGetCurrentAchievementProgress(out int unlocked, out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            try
+            {
+                uint achievementCount = this._SteamClient.SteamUserStats.GetNumAchievements();
+                if (achievementCount == 0)
+                {
+                    unlocked = 0;
+                    total = 0;
+                    return true;
+                }
+
+                int found = 0;
+                int achieved = 0;
+                for (uint i = 0; i < achievementCount; i++)
+                {
+                    string achievementId = this._SteamClient.SteamUserStats.GetAchievementName(i);
+                    if (string.IsNullOrWhiteSpace(achievementId) == true)
+                    {
+                        continue;
+                    }
+
+                    found++;
+                    if (this._SteamClient.SteamUserStats.GetAchievement(achievementId, out bool isAchieved) == true &&
+                        isAchieved == true)
+                    {
+                        achieved++;
+                    }
+                }
+
+                unlocked = achieved;
+                total = found;
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private void SaveAchievementStatusDatabaseEntry()
+        {
+            if (this._GameId <= 0 || this._GameId > uint.MaxValue)
+            {
+                return;
+            }
+
+            if (this.TryGetCurrentAchievementProgress(out int unlocked, out int total) == false)
+            {
+                return;
+            }
+
+            uint appId = (uint)this._GameId;
+            string gameName = this._SteamClient.SteamApps001.GetAppData(appId, "name");
+            if (string.IsNullOrWhiteSpace(gameName) == true)
+            {
+                gameName = "App " + appId.ToString(CultureInfo.InvariantCulture);
+            }
+
+            try
+            {
+                string path = GetAchievementStatusDatabasePath();
+                string directory = Path.GetDirectoryName(path);
+                if (string.IsNullOrEmpty(directory) == false)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                AchievementStatusDatabase database = new();
+                if (File.Exists(path) == true)
+                {
+                    try
+                    {
+                        using FileStream input = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        DataContractJsonSerializer deserializer = new(typeof(AchievementStatusDatabase));
+                        if (deserializer.ReadObject(input) is AchievementStatusDatabase existing)
+                        {
+                            database = existing;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+                    catch (SerializationException)
+                    {
+                    }
+                    catch (InvalidCastException)
+                    {
+                    }
+                }
+
+                List<AchievementStatusEntry> games = database.Games?
+                    .Where(item => item != null)
+                    .ToList() ?? new List<AchievementStatusEntry>();
+
+                int index = games.FindIndex(item => item.AppId == appId);
+                AchievementStatusEntry entry = index >= 0 ? games[index] : new AchievementStatusEntry();
+                entry.AppId = appId;
+                entry.Name = gameName;
+                entry.Type = string.IsNullOrWhiteSpace(entry.Type) == false ? entry.Type : "normal";
+                entry.AchievementUnlocked = unlocked;
+                entry.AchievementTotal = total;
+                entry.HasProgress = true;
+                entry.HasIncompleteAchievements = total > 0 && unlocked < total;
+
+                if (index >= 0)
+                {
+                    games[index] = entry;
+                }
+                else
+                {
+                    games.Add(entry);
+                }
+
+                database.GeneratedUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+                database.SteamId = this._SteamClient.SteamUser.GetSteamId();
+                database.ScanMode = string.IsNullOrWhiteSpace(database.ScanMode) == false
+                    ? database.ScanMode
+                    : "manager-update";
+                database.Games = games
+                    .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(item => item.AppId)
+                    .ToArray();
+
+                using FileStream output = new(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                serializer.WriteObject(output, database);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+        }
+
         private void OnStore(object sender, EventArgs e)
         {
             int achievements = this.StoreAchievements();
@@ -762,6 +955,8 @@ namespace SAM.Game
                 this.RefreshStats();
                 return;
             }
+
+            this.SaveAchievementStatusDatabaseEntry();
 
             MessageBox.Show(
                 this,
@@ -837,6 +1032,7 @@ namespace SAM.Game
                 return;
             }
 
+            this.SaveAchievementStatusDatabaseEntry();
             this.RefreshStats();
         }
 

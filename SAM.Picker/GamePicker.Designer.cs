@@ -42,6 +42,8 @@
             this._RefreshGamesButton = new System.Windows.Forms.ToolStripButton();
             this._AddGameTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._AddGameButton = new System.Windows.Forms.ToolStripButton();
+            this._ConfigureAuthButton = new System.Windows.Forms.ToolStripButton();
+            this._CheckAllButton = new System.Windows.Forms.ToolStripButton();
             this._FindGamesLabel = new System.Windows.Forms.ToolStripLabel();
             this._SearchGameTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._FilterDropDownButton = new System.Windows.Forms.ToolStripDropDownButton();
@@ -122,6 +124,8 @@
             _ToolStripSeparator1,
             this._AddGameTextBox,
             this._AddGameButton,
+            this._ConfigureAuthButton,
+            this._CheckAllButton,
             _ToolStripSeparator2,
             this._FindGamesLabel,
             this._SearchGameTextBox,
@@ -156,6 +160,24 @@
             this._AddGameButton.Size = new System.Drawing.Size(83, 22);
             this._AddGameButton.Text = "Add Game";
             this._AddGameButton.Click += new System.EventHandler(this.OnAddGame);
+            //
+            // _ConfigureAuthButton
+            //
+            this._ConfigureAuthButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._ConfigureAuthButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._ConfigureAuthButton.Name = "_ConfigureAuthButton";
+            this._ConfigureAuthButton.Size = new System.Drawing.Size(71, 22);
+            this._ConfigureAuthButton.Text = "Steam Auth";
+            this._ConfigureAuthButton.Click += new System.EventHandler(this.OnConfigureAuth);
+            //
+            // _CheckAllButton
+            //
+            this._CheckAllButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._CheckAllButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._CheckAllButton.Name = "_CheckAllButton";
+            this._CheckAllButton.Size = new System.Drawing.Size(57, 22);
+            this._CheckAllButton.Text = "Check All";
+            this._CheckAllButton.Click += new System.EventHandler(this.OnCheckAllAchievements);
             //
             // _FindGamesLabel
             //
@@ -394,6 +416,8 @@
         private System.Windows.Forms.ToolStripButton _RefreshGamesButton;
         private System.Windows.Forms.ToolStripTextBox _AddGameTextBox;
         private System.Windows.Forms.ToolStripButton _AddGameButton;
+        private System.Windows.Forms.ToolStripButton _ConfigureAuthButton;
+        private System.Windows.Forms.ToolStripButton _CheckAllButton;
         private System.Windows.Forms.ToolStripDropDownButton _FilterDropDownButton;
         private System.Windows.Forms.ToolStripMenuItem _FilterGamesMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterIncompleteAchievementsMenuItem;
