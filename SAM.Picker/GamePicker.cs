@@ -88,6 +88,9 @@ namespace SAM.Picker
         private int _AchievementScanTotal;
         private bool _AchievementScanPending;
         private AchievementScanMode _CurrentAchievementScanMode;
+        private readonly BackgroundWorker _UnlockAllWorker;
+        private int _UnlockAllCompleted;
+        private int _UnlockAllTotal;
         private int _LoadingSpinnerFrame;
         private GameViewMode _ViewMode;
         private GameSortMode _SortMode;
@@ -128,6 +131,45 @@ namespace SAM.Picker
                 this.GameId = gameId;
                 this.Unlocked = unlocked;
                 this.Total = total;
+            }
+        }
+
+        private sealed class UnlockAllRequest
+        {
+            public readonly List<uint> GameIds;
+
+            public UnlockAllRequest(List<uint> gameIds)
+            {
+                this.GameIds = gameIds;
+            }
+        }
+
+        private sealed class UnlockAllProgress
+        {
+            public readonly uint GameId;
+            public readonly bool Success;
+            public readonly int Changed;
+            public readonly int SkippedProtected;
+            public readonly int Unlocked;
+            public readonly int Total;
+            public readonly string Error;
+
+            public UnlockAllProgress(
+                uint gameId,
+                bool success,
+                int changed,
+                int skippedProtected,
+                int unlocked,
+                int total,
+                string error)
+            {
+                this.GameId = gameId;
+                this.Success = success;
+                this.Changed = changed;
+                this.SkippedProtected = skippedProtected;
+                this.Unlocked = unlocked;
+                this.Total = total;
+                this.Error = error;
             }
         }
 
@@ -274,6 +316,15 @@ namespace SAM.Picker
             this._LogoQueue = new();
 
             this.InitializeComponent();
+
+            this._UnlockAllWorker = new BackgroundWorker()
+            {
+                WorkerReportsProgress = true,
+                WorkerSupportsCancellation = true,
+            };
+            this._UnlockAllWorker.DoWork += this.DoUnlockAllGames;
+            this._UnlockAllWorker.ProgressChanged += this.OnUnlockAllGamesProgress;
+            this._UnlockAllWorker.RunWorkerCompleted += this.OnUnlockAllGamesCompleted;
 
             Bitmap blank = new(this._LogoImageList.ImageSize.Width, this._LogoImageList.ImageSize.Height);
             using (var g = Graphics.FromImage(blank))
@@ -1195,7 +1246,11 @@ namespace SAM.Picker
         private void UpdatePickerStatus()
         {
             string message = $"Displaying {this._FilteredGames.Count} games. Total {this._Games.Count} games.";
-            if (this._AchievementWorker.IsBusy == true)
+            if (this._UnlockAllWorker.IsBusy == true)
+            {
+                message += $" Unlocking achievements {this._UnlockAllCompleted}/{this._UnlockAllTotal}...";
+            }
+            else if (this._AchievementWorker.IsBusy == true)
             {
                 string mode = this.GetActiveScanModeLabel();
                 message += $" Checking achievements ({mode}) {this._AchievementScanCompleted}/{this._AchievementScanTotal}...";
@@ -1228,7 +1283,9 @@ namespace SAM.Picker
 
         private void UpdateLoadingIndicator()
         {
-            bool loading = this._ListWorker.IsBusy == true || this._AchievementWorker.IsBusy == true;
+            bool loading = this._ListWorker.IsBusy == true ||
+                           this._AchievementWorker.IsBusy == true ||
+                           this._UnlockAllWorker.IsBusy == true;
             if (loading == false)
             {
                 this._LoadingSpinnerTimer.Enabled = false;
@@ -1247,7 +1304,9 @@ namespace SAM.Picker
 
         private void OnLoadingSpinnerTick(object sender, EventArgs e)
         {
-            bool loading = this._ListWorker.IsBusy == true || this._AchievementWorker.IsBusy == true;
+            bool loading = this._ListWorker.IsBusy == true ||
+                           this._AchievementWorker.IsBusy == true ||
+                           this._UnlockAllWorker.IsBusy == true;
             if (loading == false)
             {
                 this._LoadingSpinnerTimer.Enabled = false;
@@ -1736,6 +1795,12 @@ namespace SAM.Picker
 
         private void StartAchievementScan()
         {
+            if (this._UnlockAllWorker.IsBusy == true)
+            {
+                this._AchievementScanPending = true;
+                return;
+            }
+
             if (this._AchievementWorker.IsBusy == true)
             {
                 this._AchievementScanPending = true;
@@ -1774,7 +1839,7 @@ namespace SAM.Picker
 
         private void StartCheckAllScan()
         {
-            if (this._AchievementWorker.IsBusy == true)
+            if (this._AchievementWorker.IsBusy == true || this._UnlockAllWorker.IsBusy == true)
             {
                 MessageBox.Show(
                     this,
@@ -1815,6 +1880,166 @@ namespace SAM.Picker
                     this._SteamCommunityCookies,
                     AchievementScanMode.LocalCheckAll));
             this.UpdateLoadingIndicator();
+        }
+
+        private void StartUnlockAllVisibleGames()
+        {
+            if (this._ListWorker.IsBusy == true ||
+                this._AchievementWorker.IsBusy == true ||
+                this._UnlockAllWorker.IsBusy == true)
+            {
+                MessageBox.Show(
+                    this,
+                    "Another operation is in progress. Please wait for it to finish.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var gameIds = this._FilteredGames
+                .Select(info => info.Id)
+                .Distinct()
+                .ToList();
+            if (gameIds.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No visible games to unlock.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            DialogResult result = MessageBox.Show(
+                this,
+                $"Unlock All will process {gameIds.Count} visible games sequentially. Continue?",
+                "Unlock All",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            this._UnlockAllCompleted = 0;
+            this._UnlockAllTotal = gameIds.Count;
+            this.UpdatePickerStatus();
+            this._UnlockAllWorker.RunWorkerAsync(new UnlockAllRequest(gameIds));
+            this.UpdateLoadingIndicator();
+        }
+
+        private void DoUnlockAllGames(object sender, DoWorkEventArgs e)
+        {
+            if (sender is not BackgroundWorker worker ||
+                e.Argument is not UnlockAllRequest request)
+            {
+                return;
+            }
+
+            int completed = 0;
+            foreach (uint gameId in request.GameIds)
+            {
+                if (worker.CancellationPending == true)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                bool success = TryUnlockAllAchievementsFromLocalProcess(
+                    gameId,
+                    out int changed,
+                    out int skippedProtected,
+                    out int unlocked,
+                    out int total,
+                    out string error);
+
+                int progress = Interlocked.Increment(ref completed);
+                worker.ReportProgress(
+                    progress,
+                    new UnlockAllProgress(
+                        gameId,
+                        success,
+                        changed,
+                        skippedProtected,
+                        unlocked,
+                        total,
+                        error));
+            }
+        }
+
+        private void OnUnlockAllGamesProgress(object sender, ProgressChangedEventArgs e)
+        {
+            if (e.UserState is not UnlockAllProgress progress)
+            {
+                return;
+            }
+
+            this._UnlockAllCompleted = e.ProgressPercentage;
+
+            if (this._Games.TryGetValue(progress.GameId, out var game) == true &&
+                progress.Unlocked >= 0 &&
+                progress.Total >= 0)
+            {
+                game.AchievementUnlocked = progress.Unlocked;
+                game.AchievementTotal = progress.Total;
+            }
+
+            if (progress.Success == true)
+            {
+                AppendAchievementScanLog(
+                    progress.GameId,
+                    $"Unlock-all completed: changed={progress.Changed}, skipped_protected={progress.SkippedProtected}, progress={progress.Unlocked}/{progress.Total}.");
+            }
+            else
+            {
+                AppendAchievementScanLog(
+                    progress.GameId,
+                    $"Unlock-all failed: {progress.Error ?? "unknown"}");
+            }
+
+            if (this._FilterIncompleteAchievementsMenuItem.Checked == true)
+            {
+                this.RefreshGames();
+                return;
+            }
+
+            this.UpdatePickerStatus();
+            this._GameListView.Invalidate();
+        }
+
+        private void OnUnlockAllGamesCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            this._UnlockAllCompleted = this._UnlockAllTotal;
+
+            if (e.Error != null)
+            {
+                MessageBox.Show(
+                    this,
+                    _($"Unlock-all operation failed:{Environment.NewLine}{e.Error.Message}"),
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            if (this._FilterIncompleteAchievementsMenuItem.Checked == true)
+            {
+                this.RefreshGames();
+            }
+            else
+            {
+                this.UpdatePickerStatus();
+                this._GameListView.Invalidate();
+            }
+
+            this.SaveAchievementStatusDatabase();
+            this.UpdatePickerStatus();
+
+            if (this._AchievementScanPending == true)
+            {
+                this.StartAchievementScan();
+            }
         }
 
         private void DoScanAchievements(object sender, DoWorkEventArgs e)
@@ -2074,6 +2299,163 @@ namespace SAM.Picker
                 AppendAchievementScanLog(gameId, $"Local process failed: {ex.Message}");
                 return false;
             }
+        }
+
+        private static bool TryUnlockAllAchievementsFromLocalProcess(
+            uint gameId,
+            out int changed,
+            out int skippedProtected,
+            out int unlocked,
+            out int total,
+            out string error)
+        {
+            changed = 0;
+            skippedProtected = 0;
+            unlocked = -1;
+            total = -1;
+            error = null;
+
+            string arguments = _($"--unlock-all {gameId.ToString(CultureInfo.InvariantCulture)}");
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = "SAM.Game.exe",
+                Arguments = arguments,
+                WorkingDirectory = Application.StartupPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+
+            try
+            {
+                AppendAchievementScanLog(gameId, $"PROCESS SAM.Game.exe {arguments}");
+                using Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    error = "process_not_started";
+                    return false;
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+                if (process.WaitForExit(45000) == false)
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+
+                    error = "timeout";
+                    return false;
+                }
+
+                if (TryParseLocalUnlockAllOutput(
+                        stdout,
+                        out changed,
+                        out skippedProtected,
+                        out unlocked,
+                        out total,
+                        out error) == true)
+                {
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(error) == true)
+                {
+                    error = string.IsNullOrWhiteSpace(stderr) == false
+                        ? stderr.Trim()
+                        : stdout.Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(error) == true)
+                {
+                    error = _($"exit_code_{process.ExitCode}");
+                }
+
+                return false;
+            }
+            catch (Win32Exception ex)
+            {
+                error = _($"start_failed_{ex.Message}");
+                return false;
+            }
+            catch (InvalidOperationException ex)
+            {
+                error = _($"process_failed_{ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool TryParseLocalUnlockAllOutput(
+            string output,
+            out int changed,
+            out int skippedProtected,
+            out int unlocked,
+            out int total,
+            out string error)
+        {
+            changed = 0;
+            skippedProtected = 0;
+            unlocked = -1;
+            total = -1;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(output) == true)
+            {
+                error = "empty_output";
+                return false;
+            }
+
+            string[] lines = output
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length == 0)
+            {
+                error = "empty_output";
+                return false;
+            }
+
+            string lastLine = lines[lines.Length - 1].Trim();
+            string[] parts = lastLine.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                error = "invalid_output";
+                return false;
+            }
+
+            if (string.Equals(parts[0], "ERR", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                error = parts.Length > 1
+                    ? string.Join("_", parts.Skip(1))
+                    : "unlock_failed";
+                return false;
+            }
+
+            if (string.Equals(parts[0], "OK", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                error = "invalid_output";
+                return false;
+            }
+
+            if (parts.Length < 5)
+            {
+                error = "invalid_output";
+                return false;
+            }
+
+            bool parsed = int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out changed) == true &&
+                          int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out skippedProtected) == true &&
+                          int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
+                          int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true;
+            if (parsed == false)
+            {
+                error = "invalid_output";
+            }
+
+            return parsed;
         }
 
         private static bool TryParseLocalProcessOutput(string output, out int unlocked, out int total)
@@ -2714,6 +3096,12 @@ namespace SAM.Picker
         {
             ClearAchievementScanLog();
             this._AchievementScanPending = false;
+            this._UnlockAllCompleted = 0;
+            this._UnlockAllTotal = 0;
+            if (this._UnlockAllWorker.IsBusy == true)
+            {
+                this._UnlockAllWorker.CancelAsync();
+            }
             if (this._AchievementWorker.IsBusy == true)
             {
                 this._AchievementWorker.CancelAsync();
@@ -2802,6 +3190,22 @@ namespace SAM.Picker
             this.StartCheckAllScan();
         }
 
+        private void OnUnlockAllAchievements(object sender, EventArgs e)
+        {
+            if (this._FilteredGames.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No visible games are available.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            this.StartUnlockAllVisibleGames();
+        }
+
         private void OnAddGame(object sender, EventArgs e)
         {
             uint id;
@@ -2830,6 +3234,12 @@ namespace SAM.Picker
             }
 
             this._AchievementScanPending = false;
+            this._UnlockAllCompleted = 0;
+            this._UnlockAllTotal = 0;
+            if (this._UnlockAllWorker.IsBusy == true)
+            {
+                this._UnlockAllWorker.CancelAsync();
+            }
             if (this._AchievementWorker.IsBusy == true)
             {
                 this._AchievementWorker.CancelAsync();

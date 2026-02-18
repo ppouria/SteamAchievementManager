@@ -21,10 +21,14 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+using APITypes = SAM.API.Types;
 
 namespace SAM.Game
 {
@@ -37,6 +41,13 @@ namespace SAM.Game
                 string.Equals(args[0], "--achievement-progress", StringComparison.OrdinalIgnoreCase) == true)
             {
                 RunAchievementProgressMode(args[1]);
+                return;
+            }
+
+            if (args.Length >= 2 &&
+                string.Equals(args[0], "--unlock-all", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                RunUnlockAllMode(args[1]);
                 return;
             }
 
@@ -137,6 +148,312 @@ namespace SAM.Game
             }
 
             Console.WriteLine($"{unlocked} {total}");
+        }
+
+        private sealed class UnlockAllResult
+        {
+            public int Changed { get; set; }
+            public int SkippedProtected { get; set; }
+            public int Unlocked { get; set; }
+            public int Total { get; set; }
+        }
+
+        private static void RunUnlockAllMode(string appIdArgument)
+        {
+            if (long.TryParse(appIdArgument, NumberStyles.Integer, CultureInfo.InvariantCulture, out var appId) == false)
+            {
+                Console.WriteLine("ERR invalid_appid");
+                return;
+            }
+
+            if (TryUnlockAllAchievements(appId, out UnlockAllResult result, out string errorCode) == false)
+            {
+                Console.WriteLine(string.IsNullOrWhiteSpace(errorCode) == false
+                    ? $"ERR {errorCode}"
+                    : "ERR unlock_failed");
+                return;
+            }
+
+            Console.WriteLine(
+                $"OK {result.Changed} {result.SkippedProtected} {result.Unlocked} {result.Total}");
+        }
+
+        private static bool TryUnlockAllAchievements(
+            long appId,
+            out UnlockAllResult result,
+            out string errorCode)
+        {
+            result = new UnlockAllResult()
+            {
+                Changed = 0,
+                SkippedProtected = 0,
+                Unlocked = -1,
+                Total = -1,
+            };
+            errorCode = null;
+
+            using API.Client client = new();
+            try
+            {
+                client.Initialize(appId);
+            }
+            catch (API.ClientInitializeException)
+            {
+                errorCode = "initialize_failed";
+                return false;
+            }
+            catch (DllNotFoundException)
+            {
+                errorCode = "missing_dll";
+                return false;
+            }
+
+            if (TryRequestUserStats(client, appId, out int callbackResult) == false)
+            {
+                if (TryTreatAsNoAchievementGame(client, out int unlocked, out int total) == true)
+                {
+                    result.Unlocked = unlocked;
+                    result.Total = total;
+                    return true;
+                }
+
+                errorCode = "request_user_stats_failed";
+                return false;
+            }
+
+            if (callbackResult != 1)
+            {
+                if (TryTreatAsNoAchievementGame(client, out int unlocked, out int total) == true)
+                {
+                    result.Unlocked = unlocked;
+                    result.Total = total;
+                    return true;
+                }
+
+                errorCode = "request_user_stats_result_failed";
+                return false;
+            }
+
+            uint achievementCount = client.SteamUserStats.GetNumAchievements();
+            if (achievementCount == 0)
+            {
+                result.Unlocked = 0;
+                result.Total = 0;
+                return true;
+            }
+
+            if (TryGetProtectedAchievementIds(appId, out HashSet<string> protectedIds) == false)
+            {
+                errorCode = "schema_unavailable";
+                return false;
+            }
+
+            bool hasChanges = false;
+            for (uint i = 0; i < achievementCount; i++)
+            {
+                string achievementId = client.SteamUserStats.GetAchievementName(i);
+                if (string.IsNullOrWhiteSpace(achievementId) == true)
+                {
+                    continue;
+                }
+
+                if (protectedIds.Contains(achievementId) == true)
+                {
+                    result.SkippedProtected++;
+                    continue;
+                }
+
+                if (client.SteamUserStats.GetAchievement(achievementId, out bool isAchieved) == false)
+                {
+                    continue;
+                }
+
+                if (isAchieved == true)
+                {
+                    continue;
+                }
+
+                if (client.SteamUserStats.SetAchievement(achievementId, true) == false)
+                {
+                    continue;
+                }
+
+                result.Changed++;
+                hasChanges = true;
+            }
+
+            if (hasChanges == true &&
+                client.SteamUserStats.StoreStats() == false)
+            {
+                errorCode = "store_failed";
+                return false;
+            }
+
+            if (TryComputeAchievementProgress(client, out int finalUnlocked, out int finalTotal) == false)
+            {
+                errorCode = "compute_progress_failed";
+                return false;
+            }
+
+            result.Unlocked = finalUnlocked;
+            result.Total = finalTotal;
+            return true;
+        }
+
+        private static bool TryRequestUserStats(API.Client client, long appId, out int callbackResult)
+        {
+            callbackResult = -1;
+
+            ulong steamId = client.SteamUser.GetSteamId();
+            bool callbackReceived = false;
+            int callbackResultLocal = -1;
+
+            var userStatsReceived = client.CreateAndRegisterCallback<API.Callbacks.UserStatsReceived>();
+            userStatsReceived.OnRun += param =>
+            {
+                if (param.SteamIdUser != steamId ||
+                    param.GameId != (ulong)appId)
+                {
+                    return;
+                }
+
+                callbackReceived = true;
+                callbackResultLocal = param.Result;
+            };
+
+            var callHandle = client.SteamUserStats.RequestUserStats(steamId);
+            if (callHandle == API.CallHandle.Invalid)
+            {
+                return false;
+            }
+
+            DateTime timeoutAt = DateTime.UtcNow.AddSeconds(8);
+            while (callbackReceived == false && DateTime.UtcNow < timeoutAt)
+            {
+                client.RunCallbacks(false);
+                Thread.Sleep(15);
+            }
+
+            callbackResult = callbackResultLocal;
+            return callbackReceived;
+        }
+
+        private static bool TryComputeAchievementProgress(API.Client client, out int unlocked, out int total)
+        {
+            unlocked = -1;
+            total = -1;
+
+            uint achievementCount = client.SteamUserStats.GetNumAchievements();
+            if (achievementCount == 0)
+            {
+                unlocked = 0;
+                total = 0;
+                return true;
+            }
+
+            int found = 0;
+            int achieved = 0;
+            for (uint i = 0; i < achievementCount; i++)
+            {
+                string achievementId = client.SteamUserStats.GetAchievementName(i);
+                if (string.IsNullOrWhiteSpace(achievementId) == true)
+                {
+                    continue;
+                }
+
+                found++;
+                if (client.SteamUserStats.GetAchievement(achievementId, out bool isAchieved) == true &&
+                    isAchieved == true)
+                {
+                    achieved++;
+                }
+            }
+
+            unlocked = achieved;
+            total = found;
+            return true;
+        }
+
+        private static bool TryGetProtectedAchievementIds(long appId, out HashSet<string> protectedIds)
+        {
+            protectedIds = new HashSet<string>(StringComparer.Ordinal);
+
+            string schemaPath;
+            try
+            {
+                string fileName = $"UserGameStatsSchema_{appId.ToString(CultureInfo.InvariantCulture)}.bin";
+                schemaPath = Path.Combine(API.Steam.GetInstallPath(), "appcache", "stats", fileName);
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+
+            if (File.Exists(schemaPath) == false)
+            {
+                return false;
+            }
+
+            KeyValue kv = KeyValue.LoadAsBinary(schemaPath);
+            if (kv == null)
+            {
+                return false;
+            }
+
+            KeyValue stats = kv[appId.ToString(CultureInfo.InvariantCulture)]["stats"];
+            if (stats.Valid == false || stats.Children == null)
+            {
+                return false;
+            }
+
+            foreach (KeyValue stat in stats.Children)
+            {
+                if (stat.Valid == false)
+                {
+                    continue;
+                }
+
+                int rawType = stat["type_int"].Valid
+                    ? stat["type_int"].AsInteger(0)
+                    : stat["type"].AsInteger(0);
+                APITypes.UserStatType type = (APITypes.UserStatType)rawType;
+                if (type != APITypes.UserStatType.Achievements &&
+                    type != APITypes.UserStatType.GroupAchievements)
+                {
+                    continue;
+                }
+
+                if (stat.Children == null)
+                {
+                    continue;
+                }
+
+                foreach (KeyValue bits in stat.Children.Where(
+                    child => string.Equals(child.Name, "bits", StringComparison.InvariantCultureIgnoreCase)))
+                {
+                    if (bits.Valid == false || bits.Children == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (KeyValue bit in bits.Children)
+                    {
+                        string id = bit["name"].AsString("");
+                        if (string.IsNullOrWhiteSpace(id) == true)
+                        {
+                            continue;
+                        }
+
+                        int permission = bit["permission"].AsInteger(0);
+                        if ((permission & 3) != 0)
+                        {
+                            protectedIds.Add(id);
+                        }
+                    }
+                }
+            }
+
+            return true;
         }
 
         private static bool TryGetAchievementProgress(long appId, out int unlocked, out int total)

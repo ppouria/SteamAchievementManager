@@ -44,6 +44,7 @@
             this._AddGameButton = new System.Windows.Forms.ToolStripButton();
             this._ConfigureAuthButton = new System.Windows.Forms.ToolStripButton();
             this._CheckAllButton = new System.Windows.Forms.ToolStripButton();
+            this._UnlockAllButton = new System.Windows.Forms.ToolStripButton();
             this._FindGamesLabel = new System.Windows.Forms.ToolStripLabel();
             this._SearchGameTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._FilterDropDownButton = new System.Windows.Forms.ToolStripDropDownButton();
@@ -126,6 +127,7 @@
             this._AddGameButton,
             this._ConfigureAuthButton,
             this._CheckAllButton,
+            this._UnlockAllButton,
             _ToolStripSeparator2,
             this._FindGamesLabel,
             this._SearchGameTextBox,
@@ -178,6 +180,15 @@
             this._CheckAllButton.Size = new System.Drawing.Size(57, 22);
             this._CheckAllButton.Text = "Check All";
             this._CheckAllButton.Click += new System.EventHandler(this.OnCheckAllAchievements);
+            //
+            // _UnlockAllButton
+            //
+            this._UnlockAllButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._UnlockAllButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._UnlockAllButton.Name = "_UnlockAllButton";
+            this._UnlockAllButton.Size = new System.Drawing.Size(64, 22);
+            this._UnlockAllButton.Text = "Unlock All";
+            this._UnlockAllButton.Click += new System.EventHandler(this.OnUnlockAllAchievements);
             //
             // _FindGamesLabel
             //
@@ -418,6 +429,7 @@
         private System.Windows.Forms.ToolStripButton _AddGameButton;
         private System.Windows.Forms.ToolStripButton _ConfigureAuthButton;
         private System.Windows.Forms.ToolStripButton _CheckAllButton;
+        private System.Windows.Forms.ToolStripButton _UnlockAllButton;
         private System.Windows.Forms.ToolStripDropDownButton _FilterDropDownButton;
         private System.Windows.Forms.ToolStripMenuItem _FilterGamesMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterIncompleteAchievementsMenuItem;
