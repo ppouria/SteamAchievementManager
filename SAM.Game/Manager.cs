@@ -98,6 +98,9 @@ namespace SAM.Game
         public Manager(long gameId, API.Client client)
         {
             this.InitializeComponent();
+            this.Text = BuildManagerWindowTitle();
+            this.ApplyModernTheme();
+            this._AutoSelectCountTextBox.Text = "25";
 
             this._MainTabControl.SelectedTab = this._AchievementsTabPage;
             //this.statisticsList.Enabled = this.checkBox1.Checked;
@@ -149,6 +152,136 @@ namespace SAM.Game
             this.RefreshStats();
         }
 
+        private void ApplyModernTheme()
+        {
+            this.SuspendLayout();
+
+            this.BackColor = Color.FromArgb(242, 242, 247);
+            this.ForeColor = Color.FromArgb(24, 24, 28);
+            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this.MinimumSize = new Size(980, 620);
+            if (this.ClientSize.Width < 980 || this.ClientSize.Height < 620)
+            {
+                this.ClientSize = new Size(1080, 700);
+            }
+
+            this._MainToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._MainToolStrip.ForeColor = this.ForeColor;
+            this._MainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
+            this._MainToolStrip.Padding = new Padding(10, 6, 10, 6);
+            this._MainToolStrip.AutoSize = false;
+            this._MainToolStrip.Height = 44;
+            this._MainToolStrip.RenderMode = ToolStripRenderMode.System;
+
+            this._AchievementsToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._AchievementsToolStrip.ForeColor = this.ForeColor;
+            this._AchievementsToolStrip.GripStyle = ToolStripGripStyle.Hidden;
+            this._AchievementsToolStrip.Padding = new Padding(8, 6, 8, 6);
+            this._AchievementsToolStrip.AutoSize = false;
+            this._AchievementsToolStrip.Height = 40;
+            this._AchievementsToolStrip.RenderMode = ToolStripRenderMode.System;
+
+            this.StyleToolStripButton(this._StoreButton, false);
+            this.StyleToolStripButton(this._ReloadButton, false);
+            this.StyleToolStripButton(this._ResetButton, false);
+            this.StyleToolStripButton(this._LockAllButton, false);
+            this.StyleToolStripButton(this._InvertAllButton, false);
+            this.StyleToolStripButton(this._UnlockAllButton, false);
+            this.StyleToolStripButton(this._DisplayLockedOnlyButton, true);
+            this.StyleToolStripButton(this._DisplayUnlockedOnlyButton, true);
+            this.StyleToolStripButton(this._AutoSelectApplyButton, true);
+
+            this._DisplayLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._MatchingStringLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._AutoSelectLabel.ForeColor = Color.FromArgb(110, 110, 116);
+
+            this._MatchingStringTextBox.AutoSize = false;
+            this._MatchingStringTextBox.Size = new Size(180, 26);
+            this._MatchingStringTextBox.BorderStyle = BorderStyle.FixedSingle;
+            this._MatchingStringTextBox.BackColor = Color.White;
+            this._MatchingStringTextBox.ForeColor = this.ForeColor;
+
+            this._AutoSelectCountTextBox.AutoSize = false;
+            this._AutoSelectCountTextBox.Size = new Size(70, 26);
+            this._AutoSelectCountTextBox.BorderStyle = BorderStyle.FixedSingle;
+            this._AutoSelectCountTextBox.BackColor = Color.White;
+            this._AutoSelectCountTextBox.ForeColor = this.ForeColor;
+
+            foreach (ToolStripItem item in this._MainToolStrip.Items)
+            {
+                if (item is ToolStripSeparator separator)
+                {
+                    separator.Margin = new Padding(6, 0, 6, 0);
+                }
+            }
+
+            foreach (ToolStripItem item in this._AchievementsToolStrip.Items)
+            {
+                if (item is ToolStripSeparator separator)
+                {
+                    separator.Margin = new Padding(6, 0, 6, 0);
+                }
+            }
+
+            this._MainTabControl.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this._MainTabControl.Padding = new Point(18, 8);
+
+            this._AchievementsTabPage.BackColor = Color.FromArgb(247, 247, 250);
+            this._StatisticsTabPage.BackColor = Color.FromArgb(247, 247, 250);
+
+            this._AchievementListView.BackColor = Color.White;
+            this._AchievementListView.ForeColor = this.ForeColor;
+            this._AchievementListView.BorderStyle = BorderStyle.None;
+            this._AchievementListView.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this._AchievementListView.GridLines = false;
+
+            this._MainStatusStrip.SizingGrip = false;
+            this._MainStatusStrip.BackColor = Color.FromArgb(248, 248, 250);
+            this._MainStatusStrip.ForeColor = Color.FromArgb(110, 110, 116);
+            this._CountryStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._GameStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._DownloadStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+
+            this._StatisticsDataGridView.BackgroundColor = Color.White;
+            this._StatisticsDataGridView.BorderStyle = BorderStyle.None;
+            this._StatisticsDataGridView.GridColor = Color.FromArgb(232, 234, 239);
+            this._StatisticsDataGridView.EnableHeadersVisualStyles = false;
+            this._StatisticsDataGridView.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(246, 247, 251);
+            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.ForeColor = this.ForeColor;
+            this._StatisticsDataGridView.DefaultCellStyle.BackColor = Color.White;
+            this._StatisticsDataGridView.DefaultCellStyle.ForeColor = this.ForeColor;
+            this._StatisticsDataGridView.DefaultCellStyle.SelectionBackColor = Color.FromArgb(223, 231, 246);
+            this._StatisticsDataGridView.DefaultCellStyle.SelectionForeColor = this.ForeColor;
+            this._StatisticsDataGridView.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 251, 255);
+            this._StatisticsDataGridView.RowHeadersVisible = false;
+
+            this._EnableStatsEditingCheckBox.ForeColor = Color.FromArgb(90, 90, 98);
+
+            this.ResumeLayout(true);
+        }
+
+        private void StyleToolStripButton(ToolStripButton button, bool textOnly)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+            button.ForeColor = this.ForeColor;
+            button.Padding = new Padding(8, 0, 8, 0);
+            button.Margin = new Padding(0, 0, 4, 0);
+
+            if (textOnly == true || button.Image == null)
+            {
+                button.DisplayStyle = ToolStripItemDisplayStyle.Text;
+                return;
+            }
+
+            button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+        }
+
         private void AddAchievementIcon(Stats.AchievementInfo info, Image icon)
         {
             if (icon == null)
@@ -163,6 +296,37 @@ namespace SAM.Game
         }
 
         private void OnIconDownload(object sender, DownloadDataCompletedEventArgs e)
+        {
+            if (this.IsDisposed == true || this.Disposing == true)
+            {
+                return;
+            }
+
+            if (this._AchievementListView.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            if (this._AchievementListView.InvokeRequired == true)
+            {
+                try
+                {
+                    this._AchievementListView.BeginInvoke((MethodInvoker)(() =>
+                    {
+                        this.ProcessIconDownload(e);
+                    }));
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return;
+            }
+
+            this.ProcessIconDownload(e);
+        }
+
+        private void ProcessIconDownload(DownloadDataCompletedEventArgs e)
         {
             if (e.Error == null && e.Cancelled == false)
             {
@@ -183,7 +347,7 @@ namespace SAM.Game
                 }
 
                 this.AddAchievementIcon(info, bitmap);
-                this._AchievementListView.Update();
+                this._AchievementListView.Invalidate();
             }
 
             this.DownloadNextIcon();
@@ -259,7 +423,7 @@ namespace SAM.Game
                     return false;
                 }
             }
-            catch (Exception e)
+            catch (Exception)
             {
                 return false;
             }
@@ -523,12 +687,18 @@ namespace SAM.Game
                     Description = def.Description,
                 };
 
+                bool isProtected = (def.Permission & 3) != 0;
                 ListViewItem item = new()
                 {
                     Checked = isAchieved,
                     Tag = info,
                     Text = info.Name,
-                    BackColor = (def.Permission & 3) == 0 ? Color.Black : Color.FromArgb(64, 0, 0),
+                    BackColor = isProtected == true
+                        ? Color.FromArgb(255, 245, 246)
+                        : Color.White,
+                    ForeColor = isProtected == true
+                        ? Color.FromArgb(126, 24, 36)
+                        : Color.FromArgb(28, 28, 33),
                 };
 
                 info.Item = item;
@@ -555,6 +725,7 @@ namespace SAM.Game
 
             this._AchievementListView.EndUpdate();
             this._IsUpdatingAchievementList = false;
+            this.ResizeAchievementColumns();
 
             this.DownloadNextIcon();
         }
@@ -602,6 +773,35 @@ namespace SAM.Game
                     });
                 }
             }
+        }
+
+        private void ResizeAchievementColumns()
+        {
+            if (this._AchievementListView?.Columns == null ||
+                this._AchievementListView.Columns.Count < 3)
+            {
+                return;
+            }
+
+            int width = this._AchievementListView.ClientSize.Width - 8;
+            if (width <= 0)
+            {
+                return;
+            }
+
+            int unlockWidth = 170;
+            int nameWidth = Math.Max(220, (int)(width * 0.30));
+            int descriptionWidth = width - nameWidth - unlockWidth;
+
+            if (descriptionWidth < 200)
+            {
+                descriptionWidth = 200;
+                nameWidth = Math.Max(180, width - unlockWidth - descriptionWidth);
+            }
+
+            this._AchievementNameColumnHeader.Width = nameWidth;
+            this._AchievementDescriptionColumnHeader.Width = Math.Max(180, descriptionWidth);
+            this._AchievementUnlockTimeColumnHeader.Width = unlockWidth;
         }
 
         private void AddAchievementToIconQueue(Stats.AchievementInfo info, bool startDownload)
@@ -748,6 +948,11 @@ namespace SAM.Game
         {
             foreach (ListViewItem item in this._AchievementListView.Items)
             {
+                if (IsProtectedAchievement(item) == true)
+                {
+                    continue;
+                }
+
                 item.Checked = false;
             }
         }
@@ -756,6 +961,11 @@ namespace SAM.Game
         {
             foreach (ListViewItem item in this._AchievementListView.Items)
             {
+                if (IsProtectedAchievement(item) == true)
+                {
+                    continue;
+                }
+
                 item.Checked = !item.Checked;
             }
         }
@@ -764,8 +974,105 @@ namespace SAM.Game
         {
             foreach (ListViewItem item in this._AchievementListView.Items)
             {
+                if (IsProtectedAchievement(item) == true)
+                {
+                    continue;
+                }
+
                 item.Checked = true;
             }
+        }
+
+        private static bool IsProtectedAchievement(ListViewItem item)
+        {
+            if (item?.Tag is not Stats.AchievementInfo info)
+            {
+                return false;
+            }
+
+            return (info.Permission & 3) != 0;
+        }
+
+        private void OnAutoSelectCountApply(object sender, EventArgs e)
+        {
+            this.AutoSelectFromCountInput();
+        }
+
+        private void OnAutoSelectCountKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            this.AutoSelectFromCountInput();
+        }
+
+        private void AutoSelectFromCountInput()
+        {
+            if (int.TryParse(this._AutoSelectCountTextBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int requestedCount) == false ||
+                requestedCount <= 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "Enter a positive number.",
+                    "Invalid Input",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                this._AutoSelectCountTextBox.Focus();
+                this._AutoSelectCountTextBox.SelectAll();
+                return;
+            }
+
+            List<ListViewItem> candidates = new();
+            foreach (ListViewItem item in this._AchievementListView.Items)
+            {
+                if (item.Tag is not Stats.AchievementInfo info)
+                {
+                    continue;
+                }
+
+                if (item.Checked == true)
+                {
+                    continue;
+                }
+
+                if ((info.Permission & 3) != 0)
+                {
+                    continue;
+                }
+
+                candidates.Add(item);
+            }
+
+            int selectedCount = Math.Min(requestedCount, candidates.Count);
+            if (selectedCount == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No selectable locked achievements are available in the current view.",
+                    "Information",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            this._AchievementListView.BeginUpdate();
+            try
+            {
+                for (int i = 0; i < selectedCount; i++)
+                {
+                    candidates[i].Checked = true;
+                }
+            }
+            finally
+            {
+                this._AchievementListView.EndUpdate();
+            }
+
+            this._GameStatusLabel.Text = $"Auto-selected {selectedCount} achievements (requested {requestedCount}, available {candidates.Count}).";
         }
 
         private bool Store()
@@ -1036,6 +1343,17 @@ namespace SAM.Game
             this.RefreshStats();
         }
 
+        private static string BuildManagerWindowTitle()
+        {
+            string version = Application.ProductVersion;
+            if (Version.TryParse(version, out Version parsed) == true)
+            {
+                version = $"{parsed.Major}.{parsed.Minor}.{parsed.Build}";
+            }
+
+            return $"Steam Achievement Manager {version}";
+        }
+
         private void OnCheckAchievement(object sender, ItemCheckEventArgs e)
         {
             if (sender != this._AchievementListView)
@@ -1083,6 +1401,12 @@ namespace SAM.Game
             }
 
             this.GetAchievements();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            this.ResizeAchievementColumns();
         }
 
         private void OnFilterUpdate(object sender, KeyEventArgs e)

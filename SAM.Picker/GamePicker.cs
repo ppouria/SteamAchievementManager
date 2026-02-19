@@ -26,6 +26,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -87,6 +88,7 @@ namespace SAM.Picker
         private int _AchievementScanCompleted;
         private int _AchievementScanTotal;
         private bool _AchievementScanPending;
+        private bool _ReloadGamesPending;
         private AchievementScanMode _CurrentAchievementScanMode;
         private readonly BackgroundWorker _UnlockAllWorker;
         private int _UnlockAllCompleted;
@@ -316,6 +318,8 @@ namespace SAM.Picker
             this._LogoQueue = new();
 
             this.InitializeComponent();
+            this.ApplyModernTheme();
+            this.UpdatePickerWindowTitle();
 
             this._UnlockAllWorker = new BackgroundWorker()
             {
@@ -359,6 +363,196 @@ namespace SAM.Picker
             this.AddGames();
         }
 
+        private void UpdatePickerWindowTitle()
+        {
+            string version = Application.ProductVersion;
+            if (Version.TryParse(version, out Version parsed) == true)
+            {
+                version = _($"{parsed.Major}.{parsed.Minor}.{parsed.Build}");
+            }
+
+            this.Text = _($"Steam Achievement Manager {version} | Pick a game... Any game...");
+        }
+
+        private void ApplyModernTheme()
+        {
+            this.SuspendLayout();
+
+            this.BackColor = Color.FromArgb(242, 242, 247);
+            this.ForeColor = Color.FromArgb(24, 24, 28);
+            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this.MinimumSize = new Size(1024, 640);
+            if (this.ClientSize.Width < 1024 || this.ClientSize.Height < 640)
+            {
+                this.ClientSize = new Size(1120, 720);
+            }
+
+            this._PickerToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._PickerToolStrip.ForeColor = this.ForeColor;
+            this._PickerToolStrip.GripStyle = ToolStripGripStyle.Hidden;
+            this._PickerToolStrip.Padding = new Padding(10, 6, 10, 6);
+            this._PickerToolStrip.AutoSize = false;
+            this._PickerToolStrip.Height = 44;
+            this._PickerToolStrip.RenderMode = ToolStripRenderMode.System;
+
+            this.StyleToolStripButton(this._RefreshGamesButton);
+            this.StyleToolStripButton(this._AddGameButton);
+            this.StyleToolStripButton(this._ConfigureAuthButton);
+            this.StyleToolStripButton(this._CheckAllButton);
+            this.StyleToolStripButton(this._UnlockAllButton);
+            this.StyleToolStripButton(this._UnlockSelectedButton);
+
+            this._AddGameTextBox.AutoSize = false;
+            this._AddGameTextBox.Size = new Size(96, 28);
+            this._AddGameTextBox.BorderStyle = BorderStyle.FixedSingle;
+            this._AddGameTextBox.BackColor = Color.White;
+            this._AddGameTextBox.ForeColor = this.ForeColor;
+
+            this._FindGamesLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._FindGamesLabel.Margin = new Padding(6, 0, 0, 0);
+            this._FindGamesLabel.Text = "Search";
+
+            this._SearchGameTextBox.AutoSize = false;
+            this._SearchGameTextBox.Size = new Size(180, 28);
+            this._SearchGameTextBox.BorderStyle = BorderStyle.FixedSingle;
+            this._SearchGameTextBox.BackColor = Color.White;
+            this._SearchGameTextBox.ForeColor = this.ForeColor;
+
+            this._FilterDropDownButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            this._FilterDropDownButton.Image = null;
+            this._FilterDropDownButton.Text = "Filters";
+            this._FilterDropDownButton.ForeColor = this.ForeColor;
+            this._FilterDropDownButton.Padding = new Padding(8, 0, 8, 0);
+            this._FilterDropDownButton.Margin = new Padding(4, 0, 0, 0);
+
+            foreach (ToolStripItem item in this._PickerToolStrip.Items)
+            {
+                if (item is ToolStripSeparator separator)
+                {
+                    separator.Margin = new Padding(6, 0, 6, 0);
+                }
+            }
+
+            foreach (ToolStripItem item in this._FilterDropDownButton.DropDownItems)
+            {
+                item.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+            }
+
+            this._FilterLoadingLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._FilterLoadingLabel.Alignment = ToolStripItemAlignment.Right;
+
+            this._GameListView.BackColor = Color.White;
+            this._GameListView.ForeColor = this.ForeColor;
+            this._GameListView.BorderStyle = BorderStyle.None;
+            this._GameListView.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+
+            this._PickerStatusStrip.SizingGrip = false;
+            this._PickerStatusStrip.BackColor = Color.FromArgb(248, 248, 250);
+            this._PickerStatusStrip.ForeColor = Color.FromArgb(110, 110, 116);
+            this._PickerStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._DownloadStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+
+            this.ResumeLayout(true);
+        }
+
+        private void StyleToolStripButton(ToolStripButton button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+            button.ForeColor = this.ForeColor;
+            button.TextImageRelation = TextImageRelation.ImageBeforeText;
+            button.Padding = new Padding(8, 0, 8, 0);
+            button.Margin = new Padding(0, 0, 4, 0);
+
+            if (button.Image == null)
+            {
+                button.DisplayStyle = ToolStripItemDisplayStyle.Text;
+                return;
+            }
+
+            button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+        }
+
+        private void SetPickerStatusTextSafe(string text)
+        {
+            if (this.IsDisposed == true ||
+                this.Disposing == true ||
+                this._PickerStatusStrip.IsDisposed == true)
+            {
+                return;
+            }
+
+            if (this._PickerStatusStrip.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            if (this._PickerStatusStrip.InvokeRequired == true)
+            {
+                try
+                {
+                    this._PickerStatusStrip.BeginInvoke((MethodInvoker)(() =>
+                    {
+                        if (this.IsDisposed == true ||
+                            this.Disposing == true ||
+                            this._PickerStatusStrip.IsDisposed == true)
+                        {
+                            return;
+                        }
+
+                        this._PickerStatusLabel.Text = text ?? "";
+                    }));
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return;
+            }
+
+            this._PickerStatusLabel.Text = text ?? "";
+        }
+
+        private static bool TryStartBackgroundWorker(BackgroundWorker worker)
+        {
+            if (worker == null || worker.IsBusy == true)
+            {
+                return false;
+            }
+
+            try
+            {
+                worker.RunWorkerAsync();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryStartBackgroundWorker(BackgroundWorker worker, object argument)
+        {
+            if (worker == null || worker.IsBusy == true)
+            {
+                return false;
+            }
+
+            try
+            {
+                worker.RunWorkerAsync(argument);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
         private void OnAppDataChanged(APITypes.AppDataChanged param)
         {
             if (param.Result == false)
@@ -379,7 +573,7 @@ namespace SAM.Picker
 
         private void DoDownloadList(object sender, DoWorkEventArgs e)
         {
-            this._PickerStatusLabel.Text = "Downloading owned game list...";
+            this.SetPickerStatusTextSafe("Downloading owned game list...");
 
             var steamId = this._SteamClient.SteamUser.GetSteamId();
             Dictionary<uint, OwnedGameInfo> mergedOwnedGames = new();
@@ -388,7 +582,7 @@ namespace SAM.Picker
             if (string.IsNullOrWhiteSpace(this._SteamWebApiKey) == false &&
                 TryDownloadOwnedGamesFromWebApi(steamId, this._SteamWebApiKey, out var webApiGames) == true)
             {
-                this._PickerStatusLabel.Text = "Merging owned games from Steam Web API...";
+                this.SetPickerStatusTextSafe("Merging owned games from Steam Web API...");
                 MergeOwnedGameInfos(mergedOwnedGames, webApiGames);
                 hasAuthoritativeOwnedGames = true;
             }
@@ -396,20 +590,20 @@ namespace SAM.Picker
             if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
                 TryDownloadOwnedGamesFromCommunity(steamId, this._SteamCommunityCookies, out var communityGames) == true)
             {
-                this._PickerStatusLabel.Text = "Merging owned games from Steam Community...";
+                this.SetPickerStatusTextSafe("Merging owned games from Steam Community...");
                 MergeOwnedGameInfos(mergedOwnedGames, communityGames);
             }
 
             if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
                 TryDownloadOwnedGamesFromCommunityHtml(steamId, this._SteamCommunityCookies, out var communityHtmlGames) == true)
             {
-                this._PickerStatusLabel.Text = "Merging owned games from Steam Community HTML...";
+                this.SetPickerStatusTextSafe("Merging owned games from Steam Community HTML...");
                 MergeOwnedGameInfos(mergedOwnedGames, communityHtmlGames);
             }
 
             if (mergedOwnedGames.Count > 0)
             {
-                this._PickerStatusLabel.Text = "Loading merged owned games...";
+                this.SetPickerStatusTextSafe("Loading merged owned games...");
                 foreach (var game in mergedOwnedGames.Values
                              .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
                              .ThenBy(item => item.AppId))
@@ -422,7 +616,7 @@ namespace SAM.Picker
 
                 if (hasAuthoritativeOwnedGames == false)
                 {
-                    this._PickerStatusLabel.Text = "Checking local ownership for additional games...";
+                    this.SetPickerStatusTextSafe("Checking local ownership for additional games...");
                     if (TryDownloadGamesXml(out var supplementalPairs) == false)
                     {
                         AppendAchievementScanLog(0, "Failed to download games.xml for supplemental ownership check. Trying ISteamApps/GetAppList.");
@@ -445,12 +639,12 @@ namespace SAM.Picker
                 return;
             }
 
-            this._PickerStatusLabel.Text = "Downloading game list...";
+            this.SetPickerStatusTextSafe("Downloading game list...");
 
             if (TryDownloadGamesXml(out var pairs) == false)
             {
                 AppendAchievementScanLog(0, "Failed to download games.xml from gib.me. Falling back to ISteamApps/GetAppList.");
-                this._PickerStatusLabel.Text = "Primary list unavailable, trying Steam app list...";
+                this.SetPickerStatusTextSafe("Primary list unavailable, trying Steam app list...");
 
                 if (TryDownloadAppListFromSteam(out pairs) == false)
                 {
@@ -458,7 +652,7 @@ namespace SAM.Picker
                 }
             }
 
-            this._PickerStatusLabel.Text = "Checking game ownership...";
+            this.SetPickerStatusTextSafe("Checking game ownership...");
             int startCount = this._Games.Count;
             foreach (var kv in pairs)
             {
@@ -1190,6 +1384,13 @@ namespace SAM.Picker
                 MessageBox.Show(e.Error.ToString(), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
+            if (this._ReloadGamesPending == true)
+            {
+                this._ReloadGamesPending = false;
+                this.AddGames();
+                return;
+            }
+
             this.RefreshGames();
             this._RefreshGamesButton.Enabled = true;
             this.StartAchievementScan();
@@ -1199,6 +1400,8 @@ namespace SAM.Picker
 
         private void RefreshGames()
         {
+            HashSet<uint> selectedGameIds = this.GetSelectedVisibleGameIds();
+
             var nameSearch = this._SearchGameTextBox.Text.Length > 0
                 ? this._SearchGameTextBox.Text
                 : null;
@@ -1241,14 +1444,81 @@ namespace SAM.Picker
             }
 
             this._GameListView.VirtualListSize = this._FilteredGames.Count;
+            this.RestoreVisibleSelection(selectedGameIds);
             this.ResizeListColumn();
             this.UpdatePickerStatus();
+            this.UpdateUnlockSelectedButtonVisibility();
+        }
 
-            if (this._GameListView.Items.Count > 0)
+        private HashSet<uint> GetSelectedVisibleGameIds()
+        {
+            HashSet<uint> selectedGameIds = new();
+            foreach (int selectedIndex in this._GameListView.SelectedIndices)
             {
-                this._GameListView.Items[0].Selected = true;
-                this._GameListView.Select();
+                if (selectedIndex < 0 || selectedIndex >= this._FilteredGames.Count)
+                {
+                    continue;
+                }
+
+                selectedGameIds.Add(this._FilteredGames[selectedIndex].Id);
             }
+
+            return selectedGameIds;
+        }
+
+        private List<uint> GetSelectedVisibleGameIdsInDisplayOrder()
+        {
+            List<uint> selectedGameIds = new();
+            HashSet<uint> seen = new();
+            foreach (int selectedIndex in this._GameListView.SelectedIndices)
+            {
+                if (selectedIndex < 0 || selectedIndex >= this._FilteredGames.Count)
+                {
+                    continue;
+                }
+
+                uint gameId = this._FilteredGames[selectedIndex].Id;
+                if (seen.Add(gameId) == false)
+                {
+                    continue;
+                }
+
+                selectedGameIds.Add(gameId);
+            }
+
+            return selectedGameIds;
+        }
+
+        private void RestoreVisibleSelection(HashSet<uint> selectedGameIds)
+        {
+            this._GameListView.SelectedIndices.Clear();
+            if (selectedGameIds == null || selectedGameIds.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this._FilteredGames.Count; i++)
+            {
+                if (selectedGameIds.Contains(this._FilteredGames[i].Id) == false)
+                {
+                    continue;
+                }
+
+                this._GameListView.SelectedIndices.Add(i);
+            }
+        }
+
+        private void UpdateUnlockSelectedButtonVisibility()
+        {
+            if (this._UnlockSelectedButton == null)
+            {
+                return;
+            }
+
+            int selectedCount = this.GetSelectedVisibleGameIds().Count;
+            this._UnlockSelectedButton.Visible = selectedCount > 0;
+            this._UnlockSelectedButton.Enabled = selectedCount > 0;
+            this._UnlockSelectedButton.Text = $"Unlock Selected ({selectedCount})";
         }
 
         private void UpdatePickerStatus()
@@ -1841,13 +2111,18 @@ namespace SAM.Picker
             this.UpdatePickerStatus();
 
             var steamId = this._SteamClient.SteamUser.GetSteamId();
-            this._AchievementWorker.RunWorkerAsync(
-                new AchievementScanRequest(
-                    gameIds,
-                    steamId,
-                    this._SteamWebApiKey,
-                    this._SteamCommunityCookies,
-                    AchievementScanMode.Auto));
+            if (TryStartBackgroundWorker(
+                    this._AchievementWorker,
+                    new AchievementScanRequest(
+                        gameIds,
+                        steamId,
+                        this._SteamWebApiKey,
+                        this._SteamCommunityCookies,
+                        AchievementScanMode.Auto)) == false)
+            {
+                this._AchievementScanPending = true;
+                return;
+            }
             this.UpdateLoadingIndicator();
         }
 
@@ -1886,17 +2161,44 @@ namespace SAM.Picker
             this.UpdatePickerStatus();
 
             var steamId = this._SteamClient.SteamUser.GetSteamId();
-            this._AchievementWorker.RunWorkerAsync(
-                new AchievementScanRequest(
-                    gameIds,
-                    steamId,
-                    this._SteamWebApiKey,
-                    this._SteamCommunityCookies,
-                    AchievementScanMode.LocalCheckAll));
+            if (TryStartBackgroundWorker(
+                    this._AchievementWorker,
+                    new AchievementScanRequest(
+                        gameIds,
+                        steamId,
+                        this._SteamWebApiKey,
+                        this._SteamCommunityCookies,
+                        AchievementScanMode.LocalCheckAll)) == false)
+            {
+                MessageBox.Show(
+                    this,
+                    "Achievement worker is currently busy. Please try again.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
             this.UpdateLoadingIndicator();
         }
 
         private void StartUnlockAllVisibleGames()
+        {
+            var gameIds = this._FilteredGames
+                .Select(info => info.Id)
+                .Distinct()
+                .ToList();
+
+            this.StartUnlockGames(gameIds, "Unlock All", "No visible games to unlock.");
+        }
+
+        private void StartUnlockSelectedVisibleGames()
+        {
+            var gameIds = this.GetSelectedVisibleGameIdsInDisplayOrder();
+
+            this.StartUnlockGames(gameIds, "Unlock Selected", "No selected games to unlock.");
+        }
+
+        private void StartUnlockGames(List<uint> gameIds, string operationName, string emptyMessage)
         {
             if (this._ListWorker.IsBusy == true ||
                 this._AchievementWorker.IsBusy == true ||
@@ -1911,15 +2213,11 @@ namespace SAM.Picker
                 return;
             }
 
-            var gameIds = this._FilteredGames
-                .Select(info => info.Id)
-                .Distinct()
-                .ToList();
-            if (gameIds.Count == 0)
+            if (gameIds == null || gameIds.Count == 0)
             {
                 MessageBox.Show(
                     this,
-                    "No visible games to unlock.",
+                    emptyMessage,
                     "Info",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -1928,8 +2226,8 @@ namespace SAM.Picker
 
             DialogResult result = MessageBox.Show(
                 this,
-                $"Unlock All will process {gameIds.Count} visible games sequentially. Continue?",
-                "Unlock All",
+                $"{operationName} will process {gameIds.Count} games sequentially. Continue?",
+                operationName,
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
             if (result != DialogResult.Yes)
@@ -1940,7 +2238,16 @@ namespace SAM.Picker
             this._UnlockAllCompleted = 0;
             this._UnlockAllTotal = gameIds.Count;
             this.UpdatePickerStatus();
-            this._UnlockAllWorker.RunWorkerAsync(new UnlockAllRequest(gameIds));
+            if (TryStartBackgroundWorker(this._UnlockAllWorker, new UnlockAllRequest(gameIds)) == false)
+            {
+                MessageBox.Show(
+                    this,
+                    "Unlock worker is currently busy. Please try again.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
             this.UpdateLoadingIndicator();
         }
 
@@ -2982,7 +3289,11 @@ namespace SAM.Picker
                 this._DownloadStatusLabel.Text = $"Downloading {1 + this._LogoQueue.Count} game icons...";
                 this._DownloadStatusLabel.Visible = true;
 
-                this._LogoWorker.RunWorkerAsync(info);
+                if (TryStartBackgroundWorker(this._LogoWorker, info) == false)
+                {
+                    this._LogoQueue.Enqueue(info);
+                    return;
+                }
             }
         }
 
@@ -3110,6 +3421,13 @@ namespace SAM.Picker
         private void AddGames()
         {
             ClearAchievementScanLog();
+            if (this._ListWorker.IsBusy == true)
+            {
+                this._ReloadGamesPending = true;
+                return;
+            }
+
+            this._ReloadGamesPending = false;
             this._AchievementScanPending = false;
             this._UnlockAllCompleted = 0;
             this._UnlockAllTotal = 0;
@@ -3126,7 +3444,11 @@ namespace SAM.Picker
             this._AchievementScanTotal = 0;
             this._Games.Clear();
             this._RefreshGamesButton.Enabled = false;
-            this._ListWorker.RunWorkerAsync();
+            if (TryStartBackgroundWorker(this._ListWorker) == false)
+            {
+                this._ReloadGamesPending = true;
+                return;
+            }
             this.UpdateLoadingIndicator();
         }
 
@@ -3159,13 +3481,20 @@ namespace SAM.Picker
 
             try
             {
-                Process.Start("SAM.Game.exe", info.Id.ToString(CultureInfo.InvariantCulture));
+                string managerPath = Path.Combine(Application.StartupPath, "SAM.Game.exe");
+                Process.Start(new ProcessStartInfo()
+                {
+                    FileName = managerPath,
+                    Arguments = info.Id.ToString(CultureInfo.InvariantCulture),
+                    WorkingDirectory = Application.StartupPath,
+                    UseShellExecute = true,
+                });
             }
             catch (Win32Exception)
             {
                 MessageBox.Show(
                     this,
-                    "Failed to start SAM.Game.exe.",
+                    "Failed to start SAM.Game.exe from the application directory.",
                     "Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -3219,6 +3548,16 @@ namespace SAM.Picker
             }
 
             this.StartUnlockAllVisibleGames();
+        }
+
+        private void OnUnlockSelectedAchievements(object sender, EventArgs e)
+        {
+            this.StartUnlockSelectedVisibleGames();
+        }
+
+        private void OnGameSelectionChanged(object sender, EventArgs e)
+        {
+            this.UpdateUnlockSelectedButtonVisibility();
         }
 
         private void OnAddGame(object sender, EventArgs e)
@@ -3352,10 +3691,9 @@ namespace SAM.Picker
 
         private void OnGameListViewDrawItem(object sender, DrawListViewItemEventArgs e)
         {
-            e.DrawDefault = true;
-
-            if (e.Item.Bounds.IntersectsWith(this._GameListView.ClientRectangle) == false)
+            if (e.ItemIndex < 0 || e.ItemIndex >= this._FilteredGames.Count)
             {
+                e.DrawDefault = true;
                 return;
             }
 
@@ -3365,6 +3703,92 @@ namespace SAM.Picker
                 this.AddGameToLogoQueue(info);
                 this.DownloadNextLogo();
             }
+
+            if (this._ViewMode != GameViewMode.Grid)
+            {
+                e.DrawDefault = true;
+                return;
+            }
+
+            if (e.Item.Bounds.IntersectsWith(this._GameListView.ClientRectangle) == false)
+            {
+                e.DrawDefault = false;
+                return;
+            }
+
+            e.DrawDefault = false;
+            Rectangle cardRect = Rectangle.Inflate(e.Bounds, -4, -4);
+            if (cardRect.Width < 20 || cardRect.Height < 20)
+            {
+                return;
+            }
+
+            bool selected = this._GameListView.SelectedIndices.Contains(e.ItemIndex);
+            Color cardColor = selected == true
+                ? Color.FromArgb(220, 233, 255)
+                : Color.White;
+            Color borderColor = selected == true
+                ? Color.FromArgb(72, 124, 244)
+                : Color.FromArgb(226, 228, 233);
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath path = CreateRoundedRectanglePath(cardRect, 10))
+            using (SolidBrush fillBrush = new(cardColor))
+            using (Pen borderPen = new(borderColor))
+            {
+                e.Graphics.FillPath(fillBrush, path);
+                e.Graphics.DrawPath(borderPen, path);
+            }
+
+            Rectangle imageRect = new(
+                cardRect.X + 8,
+                cardRect.Y + 8,
+                cardRect.Width - 16,
+                Math.Max(26, cardRect.Height - 36));
+
+            if (info.ImageIndex >= 0 && info.ImageIndex < this._LogoImageList.Images.Count)
+            {
+                Image image = this._LogoImageList.Images[info.ImageIndex];
+                if (image != null)
+                {
+                    e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    e.Graphics.DrawImage(image, imageRect);
+                }
+            }
+
+            Rectangle textRect = new(
+                cardRect.X + 10,
+                cardRect.Bottom - 24,
+                cardRect.Width - 20,
+                18);
+
+            using (StringFormat format = new()
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap,
+            })
+            using (SolidBrush textBrush = new(selected == true
+                ? Color.FromArgb(19, 52, 128)
+                : Color.FromArgb(30, 30, 34)))
+            {
+                e.Graphics.DrawString(info.DisplayName, this._GameListView.Font, textBrush, textRect, format);
+            }
+        }
+
+        private static GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
+        {
+            int diameter = radius * 2;
+            GraphicsPath path = new();
+
+            path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+
+            return path;
         }
     }
 }

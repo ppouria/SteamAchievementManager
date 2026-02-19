@@ -31,6 +31,7 @@
             this.components = new System.ComponentModel.Container();
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator1;
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator2;
+            System.Windows.Forms.ToolStripSeparator _ToolStripSeparator3;
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Manager));
             this._MainToolStrip = new System.Windows.Forms.ToolStrip();
             this._StoreButton = new System.Windows.Forms.ToolStripButton();
@@ -57,11 +58,15 @@
             this._DisplayUnlockedOnlyButton = new System.Windows.Forms.ToolStripButton();
             this._MatchingStringLabel = new System.Windows.Forms.ToolStripLabel();
             this._MatchingStringTextBox = new System.Windows.Forms.ToolStripTextBox();
+            this._AutoSelectLabel = new System.Windows.Forms.ToolStripLabel();
+            this._AutoSelectCountTextBox = new System.Windows.Forms.ToolStripTextBox();
+            this._AutoSelectApplyButton = new System.Windows.Forms.ToolStripButton();
             this._StatisticsTabPage = new System.Windows.Forms.TabPage();
             this._EnableStatsEditingCheckBox = new System.Windows.Forms.CheckBox();
             this._StatisticsDataGridView = new System.Windows.Forms.DataGridView();
             _ToolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             _ToolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
+            _ToolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
             this._MainToolStrip.SuspendLayout();
             this._MainStatusStrip.SuspendLayout();
             this._MainTabControl.SuspendLayout();
@@ -80,6 +85,11 @@
             // 
             _ToolStripSeparator2.Name = "_ToolStripSeparator2";
             _ToolStripSeparator2.Size = new System.Drawing.Size(6, 25);
+            // 
+            // _ToolStripSeparator3
+            // 
+            _ToolStripSeparator3.Name = "_ToolStripSeparator3";
+            _ToolStripSeparator3.Size = new System.Drawing.Size(6, 25);
             // 
             // _MainToolStrip
             // 
@@ -240,6 +250,10 @@
             this._InvertAllButton,
             this._UnlockAllButton,
             _ToolStripSeparator1,
+            this._AutoSelectLabel,
+            this._AutoSelectCountTextBox,
+            this._AutoSelectApplyButton,
+            _ToolStripSeparator3,
             this._DisplayLabel,
             this._DisplayLockedOnlyButton,
             this._DisplayUnlockedOnlyButton,
@@ -326,6 +340,30 @@
             this._MatchingStringTextBox.ToolTipText = "Type at least 3 characters that must appear in the name or description";
             this._MatchingStringTextBox.KeyUp += new System.Windows.Forms.KeyEventHandler(this.OnFilterUpdate);
             // 
+            // _AutoSelectLabel
+            // 
+            this._AutoSelectLabel.Name = "_AutoSelectLabel";
+            this._AutoSelectLabel.Size = new System.Drawing.Size(55, 22);
+            this._AutoSelectLabel.Text = "Select N";
+            // 
+            // _AutoSelectCountTextBox
+            // 
+            this._AutoSelectCountTextBox.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this._AutoSelectCountTextBox.Name = "_AutoSelectCountTextBox";
+            this._AutoSelectCountTextBox.Size = new System.Drawing.Size(60, 25);
+            this._AutoSelectCountTextBox.ToolTipText = "Number of locked achievements to select";
+            this._AutoSelectCountTextBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.OnAutoSelectCountKeyDown);
+            // 
+            // _AutoSelectApplyButton
+            // 
+            this._AutoSelectApplyButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._AutoSelectApplyButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._AutoSelectApplyButton.Name = "_AutoSelectApplyButton";
+            this._AutoSelectApplyButton.Size = new System.Drawing.Size(67, 22);
+            this._AutoSelectApplyButton.Text = "Apply N";
+            this._AutoSelectApplyButton.ToolTipText = "Select the requested amount from currently visible locked achievements";
+            this._AutoSelectApplyButton.Click += new System.EventHandler(this.OnAutoSelectCountApply);
+            // 
             // _StatisticsTabPage
             // 
             this._StatisticsTabPage.Controls.Add(this._EnableStatsEditingCheckBox);
@@ -378,7 +416,7 @@
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.MinimumSize = new System.Drawing.Size(640, 50);
             this.Name = "Manager";
-            this.Text = "Steam Achievement Manager 7.0";
+            this.Text = "Steam Achievement Manager";
             this._MainToolStrip.ResumeLayout(false);
             this._MainToolStrip.PerformLayout();
             this._MainStatusStrip.ResumeLayout(false);
@@ -424,6 +462,9 @@
         private System.Windows.Forms.ToolStripButton _DisplayLockedOnlyButton;
         private System.Windows.Forms.ToolStripLabel _MatchingStringLabel;
         private System.Windows.Forms.ToolStripTextBox _MatchingStringTextBox;
+        private System.Windows.Forms.ToolStripLabel _AutoSelectLabel;
+        private System.Windows.Forms.ToolStripTextBox _AutoSelectCountTextBox;
+        private System.Windows.Forms.ToolStripButton _AutoSelectApplyButton;
         private System.Windows.Forms.ColumnHeader _AchievementUnlockTimeColumnHeader;
         private System.Windows.Forms.CheckBox _EnableStatsEditingCheckBox;
     }

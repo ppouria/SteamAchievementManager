@@ -46,6 +46,7 @@
             this._ConfigureAuthButton = new System.Windows.Forms.ToolStripButton();
             this._CheckAllButton = new System.Windows.Forms.ToolStripButton();
             this._UnlockAllButton = new System.Windows.Forms.ToolStripButton();
+            this._UnlockSelectedButton = new System.Windows.Forms.ToolStripButton();
             this._FindGamesLabel = new System.Windows.Forms.ToolStripLabel();
             this._SearchGameTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._FilterDropDownButton = new System.Windows.Forms.ToolStripDropDownButton();
@@ -135,6 +136,7 @@
             this._ConfigureAuthButton,
             this._CheckAllButton,
             this._UnlockAllButton,
+            this._UnlockSelectedButton,
             _ToolStripSeparator2,
             this._FindGamesLabel,
             this._SearchGameTextBox,
@@ -196,6 +198,16 @@
             this._UnlockAllButton.Size = new System.Drawing.Size(64, 22);
             this._UnlockAllButton.Text = "Unlock All";
             this._UnlockAllButton.Click += new System.EventHandler(this.OnUnlockAllAchievements);
+            //
+            // _UnlockSelectedButton
+            //
+            this._UnlockSelectedButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._UnlockSelectedButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._UnlockSelectedButton.Name = "_UnlockSelectedButton";
+            this._UnlockSelectedButton.Size = new System.Drawing.Size(94, 22);
+            this._UnlockSelectedButton.Text = "Unlock Selected";
+            this._UnlockSelectedButton.Visible = false;
+            this._UnlockSelectedButton.Click += new System.EventHandler(this.OnUnlockSelectedAchievements);
             //
             // _FindGamesLabel
             //
@@ -347,7 +359,7 @@
             this._GameListView.HideSelection = false;
             this._GameListView.LargeImageList = this._LogoImageList;
             this._GameListView.Location = new System.Drawing.Point(0, 25);
-            this._GameListView.MultiSelect = false;
+            this._GameListView.MultiSelect = true;
             this._GameListView.Name = "_GameListView";
             this._GameListView.OwnerDraw = true;
             this._GameListView.Size = new System.Drawing.Size(742, 245);
@@ -361,6 +373,7 @@
             this._GameListView.ItemActivate += new System.EventHandler(this.OnActivateGame);
             this._GameListView.RetrieveVirtualItem += new System.Windows.Forms.RetrieveVirtualItemEventHandler(this.OnGameListViewRetrieveVirtualItem);
             this._GameListView.SearchForVirtualItem += new System.Windows.Forms.SearchForVirtualItemEventHandler(this.OnGameListViewSearchForVirtualItem);
+            this._GameListView.SelectedIndexChanged += new System.EventHandler(this.OnGameSelectionChanged);
             //
             // _PickerStatusStrip
             //
@@ -418,7 +431,7 @@
             this.Controls.Add(this._PickerToolStrip);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "GamePicker";
-            this.Text = "Steam Achievement Manager 7.0 | Pick a game... Any game...";
+            this.Text = "Steam Achievement Manager | Pick a game... Any game...";
             this._PickerToolStrip.ResumeLayout(false);
             this._PickerToolStrip.PerformLayout();
             this._PickerStatusStrip.ResumeLayout(false);
@@ -438,6 +451,7 @@
         private System.Windows.Forms.ToolStripButton _ConfigureAuthButton;
         private System.Windows.Forms.ToolStripButton _CheckAllButton;
         private System.Windows.Forms.ToolStripButton _UnlockAllButton;
+        private System.Windows.Forms.ToolStripButton _UnlockSelectedButton;
         private System.Windows.Forms.ToolStripDropDownButton _FilterDropDownButton;
         private System.Windows.Forms.ToolStripMenuItem _FilterGamesMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterIncompleteAchievementsMenuItem;
