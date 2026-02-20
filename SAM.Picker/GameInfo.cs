@@ -21,7 +21,6 @@
  */
 
 using System.Globalization;
-using System.Windows.Forms;
 
 namespace SAM.Picker
 {
@@ -40,8 +39,6 @@ namespace SAM.Picker
         }
 
         public string ImageUrl;
-
-        public ListViewItem Item;
 
         public int AchievementUnlocked;
         public int AchievementTotal;

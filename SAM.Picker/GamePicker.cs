@@ -366,6 +366,11 @@ namespace SAM.Picker
         private void UpdatePickerWindowTitle()
         {
             string version = Application.ProductVersion;
+            int metadataSeparator = version?.IndexOf('+') ?? -1;
+            if (metadataSeparator > 0)
+            {
+                version = version.Substring(0, metadataSeparator);
+            }
             if (Version.TryParse(version, out Version parsed) == true)
             {
                 version = _($"{parsed.Major}.{parsed.Minor}.{parsed.Build}");
@@ -577,28 +582,42 @@ namespace SAM.Picker
 
             var steamId = this._SteamClient.SteamUser.GetSteamId();
             Dictionary<uint, OwnedGameInfo> mergedOwnedGames = new();
-            bool hasAuthoritativeOwnedGames = false;
+            bool hasNetworkOwnedGames = false;
+            bool hasCommunityCookies = (this._SteamCommunityCookies?.Count ?? 0) > 0;
 
             if (string.IsNullOrWhiteSpace(this._SteamWebApiKey) == false &&
                 TryDownloadOwnedGamesFromWebApi(steamId, this._SteamWebApiKey, out var webApiGames) == true)
             {
                 this.SetPickerStatusTextSafe("Merging owned games from Steam Web API...");
                 MergeOwnedGameInfos(mergedOwnedGames, webApiGames);
-                hasAuthoritativeOwnedGames = true;
+                hasNetworkOwnedGames = true;
             }
 
-            if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
-                TryDownloadOwnedGamesFromCommunity(steamId, this._SteamCommunityCookies, out var communityGames) == true)
+            // When no Web API list is available, try Steam Community before doing
+            // expensive local ownership checks over large app-id sets.
+            if (hasNetworkOwnedGames == false)
             {
-                this.SetPickerStatusTextSafe("Merging owned games from Steam Community...");
-                MergeOwnedGameInfos(mergedOwnedGames, communityGames);
-            }
+                if (TryDownloadOwnedGamesFromCommunity(steamId, this._SteamCommunityCookies, out var communityGames) == true)
+                {
+                    this.SetPickerStatusTextSafe(
+                        hasCommunityCookies == true
+                            ? "Merging owned games from Steam Community..."
+                            : "Merging owned games from Steam Community (public profile)...");
+                    MergeOwnedGameInfos(mergedOwnedGames, communityGames);
+                    hasNetworkOwnedGames = true;
+                }
 
-            if ((this._SteamCommunityCookies?.Count ?? 0) > 0 &&
-                TryDownloadOwnedGamesFromCommunityHtml(steamId, this._SteamCommunityCookies, out var communityHtmlGames) == true)
-            {
-                this.SetPickerStatusTextSafe("Merging owned games from Steam Community HTML...");
-                MergeOwnedGameInfos(mergedOwnedGames, communityHtmlGames);
+                // Keep HTML parsing as a fallback path when XML endpoint isn't usable.
+                if (hasNetworkOwnedGames == false &&
+                    TryDownloadOwnedGamesFromCommunityHtml(steamId, this._SteamCommunityCookies, out var communityHtmlGames) == true)
+                {
+                    this.SetPickerStatusTextSafe(
+                        hasCommunityCookies == true
+                            ? "Merging owned games from Steam Community HTML..."
+                            : "Merging owned games from Steam Community HTML (public profile)...");
+                    MergeOwnedGameInfos(mergedOwnedGames, communityHtmlGames);
+                    hasNetworkOwnedGames = true;
+                }
             }
 
             if (mergedOwnedGames.Count > 0)
@@ -613,28 +632,7 @@ namespace SAM.Picker
                 }
 
                 AppendAchievementScanLog(0, $"Merged owned game list contains {mergedOwnedGames.Count} apps.");
-
-                if (hasAuthoritativeOwnedGames == false)
-                {
-                    this.SetPickerStatusTextSafe("Checking local ownership for additional games...");
-                    if (TryDownloadGamesXml(out var supplementalPairs) == false)
-                    {
-                        AppendAchievementScanLog(0, "Failed to download games.xml for supplemental ownership check. Trying ISteamApps/GetAppList.");
-                        TryDownloadAppListFromSteam(out supplementalPairs);
-                    }
-
-                    if (supplementalPairs != null && supplementalPairs.Count > 0)
-                    {
-                        int supplementalStartCount = this._Games.Count;
-                        foreach (var kv in supplementalPairs)
-                        {
-                            this.AddGame(kv.Key, kv.Value);
-                        }
-
-                        int supplementalAdded = this._Games.Count - supplementalStartCount;
-                        AppendAchievementScanLog(0, $"Supplemental ownership filter added {supplementalAdded} games from {supplementalPairs.Count} candidates.");
-                    }
-                }
+                AppendAchievementScanLog(0, "Using owned-game list from network source; skipping supplemental local ownership sweep.");
 
                 return;
             }
@@ -902,15 +900,10 @@ namespace SAM.Picker
 
         private static bool TryDownloadOwnedGamesFromCommunity(
             ulong steamId,
-            Dictionary<string, string> cookies,
+            IDictionary<string, string> cookies,
             out List<OwnedGameInfo> games)
         {
             games = null;
-            if (cookies == null || cookies.Count == 0)
-            {
-                return false;
-            }
-
             string url = $"https://steamcommunity.com/profiles/{steamId}/games/?tab=all&xml=1";
             try
             {
@@ -921,7 +914,10 @@ namespace SAM.Picker
                 request.ReadWriteTimeout = 12000;
                 request.UserAgent = "SteamAchievementManager";
                 request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-                request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+                if (cookies != null && cookies.Count > 0)
+                {
+                    request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+                }
 
                 using var response = (HttpWebResponse)request.GetResponse();
                 using var stream = response.GetResponseStream();
@@ -947,7 +943,7 @@ namespace SAM.Picker
                 if (trimmed.StartsWith("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) == true ||
                     trimmed.StartsWith("<html", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    AppendAchievementScanLog(0, "Community owned games endpoint returned HTML (authentication required or invalid cookies).");
+                    AppendAchievementScanLog(0, "Community owned games endpoint returned HTML (private profile, authentication required, or invalid cookies).");
                     return false;
                 }
 
@@ -1016,15 +1012,10 @@ namespace SAM.Picker
 
         private static bool TryDownloadOwnedGamesFromCommunityHtml(
             ulong steamId,
-            Dictionary<string, string> cookies,
+            IDictionary<string, string> cookies,
             out List<OwnedGameInfo> games)
         {
             games = null;
-            if (cookies == null || cookies.Count == 0)
-            {
-                return false;
-            }
-
             string url = $"https://steamcommunity.com/profiles/{steamId}/games?tab=all&sort=achievements";
             try
             {
@@ -1035,7 +1026,10 @@ namespace SAM.Picker
                 request.ReadWriteTimeout = 12000;
                 request.UserAgent = "SteamAchievementManager";
                 request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-                request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+                if (cookies != null && cookies.Count > 0)
+                {
+                    request.CookieContainer = CreateSteamCommunityCookieContainer(cookies);
+                }
 
                 using var response = (HttpWebResponse)request.GetResponse();
                 using var stream = response.GetResponseStream();
@@ -1059,7 +1053,7 @@ namespace SAM.Picker
 
                 if (html.IndexOf("<title>Sign In", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    AppendAchievementScanLog(0, "Community games HTML endpoint returned sign-in page (invalid or expired cookies).");
+                    AppendAchievementScanLog(0, "Community games HTML endpoint returned sign-in page (private profile or invalid/expired cookies).");
                     return false;
                 }
 
@@ -1603,8 +1597,14 @@ namespace SAM.Picker
 
         private void OnGameListViewRetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
         {
+            if (e.ItemIndex < 0 || e.ItemIndex >= this._FilteredGames.Count)
+            {
+                e.Item = new ListViewItem();
+                return;
+            }
+
             var info = this._FilteredGames[e.ItemIndex];
-            e.Item = info.Item = new()
+            e.Item = new()
             {
                 Text = info.DisplayName,
                 ImageIndex = info.ImageIndex,
@@ -3066,9 +3066,13 @@ namespace SAM.Picker
         private static CookieContainer CreateSteamCommunityCookieContainer(IDictionary<string, string> cookies)
         {
             CookieContainer container = new();
+            if (cookies == null || cookies.Count == 0)
+            {
+                return container;
+            }
+
             string loginSecure = null;
-            if (cookies != null &&
-                cookies.TryGetValue("steamLoginSecure", out var value) == true &&
+            if (cookies.TryGetValue("steamLoginSecure", out var value) == true &&
                 string.IsNullOrWhiteSpace(value) == false)
             {
                 loginSecure = value.Trim();
@@ -3271,13 +3275,7 @@ namespace SAM.Picker
                         return;
                     }
 
-                    if (info.Item == null)
-                    {
-                        continue;
-                    }
-
-                    if (this._FilteredGames.Contains(info) == false ||
-                        info.Item.Bounds.IntersectsWith(this._GameListView.ClientRectangle) == false)
+                    if (this._FilteredGames.Contains(info) == false)
                     {
                         this._LogosAttempting.Remove(info.ImageUrl);
                         continue;

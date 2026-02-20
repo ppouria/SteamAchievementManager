@@ -43,7 +43,9 @@ namespace SAM.Game
 
         private readonly WebClient _IconDownloader = new();
 
-        private readonly List<Stats.AchievementInfo> _IconQueue = new();
+        private readonly Queue<string> _IconQueue = new();
+        private readonly Dictionary<string, List<Stats.AchievementInfo>> _PendingIconConsumers =
+            new(StringComparer.Ordinal);
         private readonly List<Stats.StatDefinition> _StatDefinitions = new();
 
         private readonly List<Stats.AchievementDefinition> _AchievementDefinitions = new();
@@ -282,17 +284,107 @@ namespace SAM.Game
             button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
         }
 
-        private void AddAchievementIcon(Stats.AchievementInfo info, Image icon)
+        private static string GetAchievementIconKey(Stats.AchievementInfo info)
         {
-            if (icon == null)
+            if (info == null)
             {
-                info.ImageIndex = 0;
+                return null;
             }
-            else
+
+            string key = info.IsAchieved == true ? info.IconNormal : info.IconLocked;
+            return string.IsNullOrWhiteSpace(key) == true ? null : key;
+        }
+
+        private int AddAchievementIcon(string iconKey, Image icon)
+        {
+            if (icon == null || string.IsNullOrWhiteSpace(iconKey) == true)
             {
-                info.ImageIndex = this._AchievementImageList.Images.Count;
-                this._AchievementImageList.Images.Add(info.IsAchieved == true ? info.IconNormal : info.IconLocked, icon);
+                return 0;
             }
+
+            int existingIndex = this._AchievementImageList.Images.IndexOfKey(iconKey);
+            if (existingIndex >= 0)
+            {
+                return existingIndex;
+            }
+
+            int imageIndex = this._AchievementImageList.Images.Count;
+            this._AchievementImageList.Images.Add(iconKey, icon);
+            return imageIndex;
+        }
+
+        private static Bitmap DecodeAchievementBitmap(byte[] data)
+        {
+            if (data == null || data.Length == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                using MemoryStream stream = new(data, false);
+                using Image decoded = Image.FromStream(stream, true, false);
+                return new Bitmap(decoded);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private void InvalidateVisibleAchievementItems(IEnumerable<Stats.AchievementInfo> infos)
+        {
+            if (infos == null || this._AchievementListView.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            Rectangle viewport = this._AchievementListView.ClientRectangle;
+            bool invalidatedAny = false;
+            foreach (var info in infos)
+            {
+                ListViewItem item = info?.Item;
+                if (item == null || item.ListView != this._AchievementListView)
+                {
+                    continue;
+                }
+
+                Rectangle bounds;
+                try
+                {
+                    bounds = item.Bounds;
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+
+                if (bounds.IsEmpty == true ||
+                    bounds.IntersectsWith(viewport) == false)
+                {
+                    continue;
+                }
+
+                this._AchievementListView.Invalidate(bounds);
+                invalidatedAny = true;
+            }
+
+            if (invalidatedAny == false)
+            {
+                this._AchievementListView.Invalidate();
+            }
+        }
+
+        private void ResetIconDownloads()
+        {
+            if (this._IconDownloader.IsBusy == true)
+            {
+                this._IconDownloader.CancelAsync();
+            }
+
+            this._IconQueue.Clear();
+            this._PendingIconConsumers.Clear();
+            this._DownloadStatusLabel.Visible = false;
         }
 
         private void OnIconDownload(object sender, DownloadDataCompletedEventArgs e)
@@ -328,54 +420,85 @@ namespace SAM.Game
 
         private void ProcessIconDownload(DownloadDataCompletedEventArgs e)
         {
-            if (e.Error == null && e.Cancelled == false)
+            string iconKey = e.UserState as string;
+            if (string.IsNullOrWhiteSpace(iconKey) == true)
             {
-                var info = (Stats.AchievementInfo)e.UserState;
-
-                Bitmap bitmap;
-                try
-                {
-                    using (MemoryStream stream = new())
-                    {
-                        stream.Write(e.Result, 0, e.Result.Length);
-                        bitmap = new(stream);
-                    }
-                }
-                catch (Exception)
-                {
-                    bitmap = null;
-                }
-
-                this.AddAchievementIcon(info, bitmap);
-                this._AchievementListView.Invalidate();
+                this.DownloadNextIcon();
+                return;
             }
 
+            if (this._PendingIconConsumers.TryGetValue(iconKey, out var consumers) == false ||
+                consumers == null ||
+                consumers.Count == 0)
+            {
+                this.DownloadNextIcon();
+                return;
+            }
+
+            int imageIndex = 0;
+            if (e.Error == null && e.Cancelled == false)
+            {
+                using Bitmap bitmap = DecodeAchievementBitmap(e.Result);
+                imageIndex = this.AddAchievementIcon(iconKey, bitmap);
+            }
+
+            foreach (var info in consumers)
+            {
+                info.ImageIndex = imageIndex;
+            }
+
+            this._PendingIconConsumers.Remove(iconKey);
+            this.InvalidateVisibleAchievementItems(consumers);
             this.DownloadNextIcon();
         }
 
         private void DownloadNextIcon()
         {
-            if (this._IconQueue.Count == 0)
+            while (true)
             {
-                this._DownloadStatusLabel.Visible = false;
+                if (this._IconQueue.Count == 0)
+                {
+                    this._DownloadStatusLabel.Visible = false;
+                    return;
+                }
+
+                if (this._IconDownloader.IsBusy == true)
+                {
+                    return;
+                }
+
+                string iconKey = this._IconQueue.Dequeue();
+                if (string.IsNullOrWhiteSpace(iconKey) == true ||
+                    this._PendingIconConsumers.ContainsKey(iconKey) == false)
+                {
+                    continue;
+                }
+
+                this._DownloadStatusLabel.Text = $"Downloading {1 + this._IconQueue.Count} icons...";
+                this._DownloadStatusLabel.Visible = true;
+
+                try
+                {
+                    this._IconDownloader.DownloadDataAsync(
+                        new Uri(_($"https://cdn.steamstatic.com/steamcommunity/public/images/apps/{this._GameId}/{iconKey}")),
+                        iconKey);
+                }
+                catch (Exception)
+                {
+                    if (this._PendingIconConsumers.TryGetValue(iconKey, out var consumers) == true)
+                    {
+                        foreach (var info in consumers)
+                        {
+                            info.ImageIndex = 0;
+                        }
+                        this._PendingIconConsumers.Remove(iconKey);
+                    }
+
+                    continue;
+                }
+
                 return;
             }
-
-            if (this._IconDownloader.IsBusy == true)
-            {
-                return;
-            }
-
-            this._DownloadStatusLabel.Text = $"Downloading {this._IconQueue.Count} icons...";
-            this._DownloadStatusLabel.Visible = true;
-
-            var info = this._IconQueue[0];
-            this._IconQueue.RemoveAt(0);
-
-
-            this._IconDownloader.DownloadDataAsync(
-                new Uri(_($"https://cdn.steamstatic.com/steamcommunity/public/images/apps/{this._GameId}/{(info.IsAchieved == true ? info.IconNormal : info.IconLocked)}")),
-                info);
         }
 
         private static string TranslateError(int id) => id switch
@@ -604,6 +727,7 @@ namespace SAM.Game
 
         private void RefreshStats()
         {
+            this.ResetIconDownloads();
             this._AchievementListView.Items.Clear();
             this._StatisticsDataGridView.Rows.Clear();
 
@@ -631,100 +755,122 @@ namespace SAM.Game
                 : null;
 
             this._IsUpdatingAchievementList = true;
+            this.ResetIconDownloads();
 
-            this._AchievementListView.Items.Clear();
             this._AchievementListView.BeginUpdate();
-            //this.Achievements.Clear();
+            SortOrder originalSorting = this._AchievementListView.Sorting;
+            this._AchievementListView.Sorting = SortOrder.None;
 
-            bool wantLocked = this._DisplayLockedOnlyButton.Checked == true;
-            bool wantUnlocked = this._DisplayUnlockedOnlyButton.Checked == true;
-
-            foreach (var def in this._AchievementDefinitions)
+            try
             {
-                if (string.IsNullOrEmpty(def.Id) == true)
-                {
-                    continue;
-                }
+                this._AchievementListView.Items.Clear();
 
-                if (this._SteamClient.SteamUserStats.GetAchievementAndUnlockTime(
-                    def.Id,
-                    out bool isAchieved,
-                    out var unlockTime) == false)
-                {
-                    continue;
-                }
+                bool wantLocked = this._DisplayLockedOnlyButton.Checked == true;
+                bool wantUnlocked = this._DisplayUnlockedOnlyButton.Checked == true;
+                List<ListViewItem> items = new(this._AchievementDefinitions.Count);
 
-                bool wanted = (wantLocked == false && wantUnlocked == false) || isAchieved switch
+                foreach (var def in this._AchievementDefinitions)
                 {
-                    true => wantUnlocked,
-                    false => wantLocked,
-                };
-                if (wanted == false)
-                {
-                    continue;
-                }
-
-                if (textSearch != null)
-                {
-                    if (def.Name.IndexOf(textSearch, StringComparison.OrdinalIgnoreCase) < 0 &&
-                        def.Description.IndexOf(textSearch, StringComparison.OrdinalIgnoreCase) < 0)
+                    if (string.IsNullOrEmpty(def.Id) == true)
                     {
                         continue;
                     }
+
+                    if (this._SteamClient.SteamUserStats.GetAchievementAndUnlockTime(
+                        def.Id,
+                        out bool isAchieved,
+                        out var unlockTime) == false)
+                    {
+                        continue;
+                    }
+
+                    bool wanted = (wantLocked == false && wantUnlocked == false) || isAchieved switch
+                    {
+                        true => wantUnlocked,
+                        false => wantLocked,
+                    };
+                    if (wanted == false)
+                    {
+                        continue;
+                    }
+
+                    string name = def.Name ?? def.Id;
+                    string description = def.Description ?? "";
+                    if (textSearch != null)
+                    {
+                        if (name.IndexOf(textSearch, StringComparison.OrdinalIgnoreCase) < 0 &&
+                            description.IndexOf(textSearch, StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            continue;
+                        }
+                    }
+
+                    Stats.AchievementInfo info = new()
+                    {
+                        Id = def.Id,
+                        IsAchieved = isAchieved,
+                        UnlockTime = isAchieved == true && unlockTime > 0
+                            ? DateTimeOffset.FromUnixTimeSeconds(unlockTime).LocalDateTime
+                            : null,
+                        IconNormal = string.IsNullOrEmpty(def.IconNormal) ? null : def.IconNormal,
+                        IconLocked = string.IsNullOrEmpty(def.IconLocked) ? def.IconNormal : def.IconLocked,
+                        Permission = def.Permission,
+                        Name = name,
+                        Description = description,
+                    };
+
+                    bool isProtected = (def.Permission & 3) != 0;
+                    ListViewItem item = new()
+                    {
+                        Checked = isAchieved,
+                        Tag = info,
+                        Text = info.Name,
+                        BackColor = isProtected == true
+                            ? Color.FromArgb(255, 245, 246)
+                            : Color.White,
+                        ForeColor = isProtected == true
+                            ? Color.FromArgb(126, 24, 36)
+                            : Color.FromArgb(28, 28, 33),
+                    };
+
+                    info.Item = item;
+
+                    if (item.Text.StartsWith("#", StringComparison.InvariantCulture) == true)
+                    {
+                        item.Text = info.Id;
+                        item.SubItems.Add("");
+                    }
+                    else
+                    {
+                        item.SubItems.Add(info.Description);
+                    }
+
+                    item.SubItems.Add(info.UnlockTime.HasValue == true
+                        ? info.UnlockTime.Value.ToString()
+                        : "");
+
+                    info.ImageIndex = 0;
+                    this.AddAchievementToIconQueue(info, false);
+                    items.Add(item);
                 }
 
-                Stats.AchievementInfo info = new()
+                if (items.Count > 0)
                 {
-                    Id = def.Id,
-                    IsAchieved = isAchieved,
-                    UnlockTime = isAchieved == true && unlockTime > 0
-                        ? DateTimeOffset.FromUnixTimeSeconds(unlockTime).LocalDateTime
-                        : null,
-                    IconNormal = string.IsNullOrEmpty(def.IconNormal) ? null : def.IconNormal,
-                    IconLocked = string.IsNullOrEmpty(def.IconLocked) ? def.IconNormal : def.IconLocked,
-                    Permission = def.Permission,
-                    Name = def.Name,
-                    Description = def.Description,
-                };
-
-                bool isProtected = (def.Permission & 3) != 0;
-                ListViewItem item = new()
-                {
-                    Checked = isAchieved,
-                    Tag = info,
-                    Text = info.Name,
-                    BackColor = isProtected == true
-                        ? Color.FromArgb(255, 245, 246)
-                        : Color.White,
-                    ForeColor = isProtected == true
-                        ? Color.FromArgb(126, 24, 36)
-                        : Color.FromArgb(28, 28, 33),
-                };
-
-                info.Item = item;
-
-                if (item.Text.StartsWith("#", StringComparison.InvariantCulture) == true)
-                {
-                    item.Text = info.Id;
-                    item.SubItems.Add("");
+                    this._AchievementListView.Items.AddRange(items.ToArray());
                 }
-                else
+            }
+            finally
+            {
+                this._AchievementListView.Sorting = originalSorting;
+                if (originalSorting != SortOrder.None)
                 {
-                    item.SubItems.Add(info.Description);
+                    this._AchievementListView.Sort();
                 }
 
-                item.SubItems.Add(info.UnlockTime.HasValue == true
-                    ? info.UnlockTime.Value.ToString()
-                    : "");
-
-                info.ImageIndex = 0;
-
-                this.AddAchievementToIconQueue(info, false);
-                this._AchievementListView.Items.Add(item);
+                this._AchievementListView.EndUpdate();
+                this._IsUpdatingAchievementList = false;
             }
 
-            this._AchievementListView.EndUpdate();
-            this._IsUpdatingAchievementList = false;
             this.ResizeAchievementColumns();
 
             this.DownloadNextIcon();
@@ -806,21 +952,32 @@ namespace SAM.Game
 
         private void AddAchievementToIconQueue(Stats.AchievementInfo info, bool startDownload)
         {
-            int imageIndex = this._AchievementImageList.Images.IndexOfKey(
-                info.IsAchieved == true ? info.IconNormal : info.IconLocked);
+            string iconKey = GetAchievementIconKey(info);
+            if (string.IsNullOrWhiteSpace(iconKey) == true)
+            {
+                info.ImageIndex = 0;
+                return;
+            }
 
+            int imageIndex = this._AchievementImageList.Images.IndexOfKey(iconKey);
             if (imageIndex >= 0)
             {
                 info.ImageIndex = imageIndex;
+                return;
             }
-            else
-            {
-                this._IconQueue.Add(info);
 
-                if (startDownload == true)
-                {
-                    this.DownloadNextIcon();
-                }
+            if (this._PendingIconConsumers.TryGetValue(iconKey, out var consumers) == false)
+            {
+                consumers = new List<Stats.AchievementInfo>();
+                this._PendingIconConsumers.Add(iconKey, consumers);
+                this._IconQueue.Enqueue(iconKey);
+            }
+
+            consumers.Add(info);
+
+            if (startDownload == true)
+            {
+                this.DownloadNextIcon();
             }
         }
 
@@ -1346,6 +1503,11 @@ namespace SAM.Game
         private static string BuildManagerWindowTitle()
         {
             string version = Application.ProductVersion;
+            int metadataSeparator = version?.IndexOf('+') ?? -1;
+            if (metadataSeparator > 0)
+            {
+                version = version.Substring(0, metadataSeparator);
+            }
             if (Version.TryParse(version, out Version parsed) == true)
             {
                 version = $"{parsed.Major}.{parsed.Minor}.{parsed.Build}";

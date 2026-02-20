@@ -34,14 +34,59 @@ jobs:
         run: nuget restore SAM.sln
 
       - name: Build
-        run: msbuild SAM.sln /m /p:Configuration=${{ env.CONFIGURATION }} /p:Platform=${{ env.PLATFORM }}
+        run: msbuild SAM.sln /m /t:Rebuild /p:Configuration=${{ env.CONFIGURATION }} /p:Platform=${{ env.PLATFORM }}
 
       - name: Prepare Package
         id: pack
         shell: pwsh
         run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
-          $packageName = "SteamAchievementManager-${env:GITHUB_RUN_NUMBER}-${shortSha}"
+          $version = ""
+          try {
+            $project = [xml](Get-Content "SAM.Picker/SAM.Picker.csproj")
+            $versionNode = $project.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
+            if ($null -ne $versionNode) {
+              $version = "$($versionNode.Version)".Trim()
+            }
+          } catch {
+            $version = ""
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "dev"
+          }
+
+          if ("${{ github.event_name }}" -eq "release") {
+            $tagName = "${{ github.event.release.tag_name }}"
+            if ([string]::IsNullOrWhiteSpace($tagName) -eq $false) {
+              $normalizedTag = $tagName.TrimStart('v', 'V')
+              if ([string]::IsNullOrWhiteSpace($normalizedTag) -eq $false) {
+                $version = $normalizedTag
+              }
+            }
+          }
+
+          if ($version -match '^\d+\.\d+\.\d+$') {
+            $expectedFileVersion = "$version.0"
+            $pickerExe = "upload/SAM.Picker.exe"
+            $gameExe = "upload/SAM.Game.exe"
+
+            if ((Test-Path $pickerExe) -eq $false -or (Test-Path $gameExe) -eq $false) {
+              throw "Expected build outputs not found in upload/ (SAM.Picker.exe or SAM.Game.exe)."
+            }
+
+            $pickerFileVersion = (Get-Item $pickerExe).VersionInfo.FileVersion
+            $gameFileVersion = (Get-Item $gameExe).VersionInfo.FileVersion
+
+            if ($pickerFileVersion -ne $expectedFileVersion) {
+              throw "SAM.Picker.exe file version mismatch. Expected $expectedFileVersion, got $pickerFileVersion."
+            }
+
+            if ($gameFileVersion -ne $expectedFileVersion) {
+              throw "SAM.Game.exe file version mismatch. Expected $expectedFileVersion, got $gameFileVersion."
+            }
+          }
+
+          $packageName = "SteamAchievementManager-$version"
           $zipName = "${packageName}.zip"
 
           New-Item -ItemType Directory -Path package -Force | Out-Null
