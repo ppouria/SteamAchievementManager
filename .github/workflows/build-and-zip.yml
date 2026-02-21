@@ -136,11 +136,9 @@ jobs:
             New-Item -ItemType Directory -Path $achievementsRoot -Force | Out-Null
 
             $defaultStatusPath = Join-Path $achievementsRoot "status.json"
-            @'
-{
-  "games": []
-}
-'@ | Set-Content -Path $defaultStatusPath -Encoding UTF8
+            $defaultStatusObject = @{ games = @() }
+            $defaultStatusJson = $defaultStatusObject | ConvertTo-Json -Depth 4
+            $defaultStatusJson | Set-Content -Path $defaultStatusPath -Encoding UTF8
           }
 
           Compress-Archive -Path $packageRoot -DestinationPath "release\$zipName" -CompressionLevel Optimal -Force
