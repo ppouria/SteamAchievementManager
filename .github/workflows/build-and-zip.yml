@@ -112,19 +112,35 @@ jobs:
 
           Copy-Item -Path LICENSE.txt -Destination (Join-Path $packageRoot "LICENSE.txt") -Force
 
-          $releaseItems = @(
+          $requiredReleaseItems = @(
             "upload/SAM.API.dll",
             "upload/SAM.Game.exe",
-            "upload/SAM.Picker.exe",
-            "upload/data"
+            "upload/SAM.Picker.exe"
           )
 
-          foreach ($item in $releaseItems) {
+          foreach ($item in $requiredReleaseItems) {
             if (Test-Path $item) {
               Copy-Item -Path $item -Destination $packageRoot -Recurse -Force
             } else {
               throw "Required release item not found: $item"
             }
+          }
+
+          $dataSource = "upload/data"
+          if (Test-Path $dataSource) {
+            Copy-Item -Path $dataSource -Destination $packageRoot -Recurse -Force
+          } else {
+            $dataRoot = Join-Path $packageRoot "data"
+            $gamesRoot = Join-Path $dataRoot "games"
+            $achievementsRoot = Join-Path $gamesRoot "achievements"
+            New-Item -ItemType Directory -Path $achievementsRoot -Force | Out-Null
+
+            $defaultStatusPath = Join-Path $achievementsRoot "status.json"
+            @'
+{
+  "games": []
+}
+'@ | Set-Content -Path $defaultStatusPath -Encoding UTF8
           }
 
           Compress-Archive -Path $packageRoot -DestinationPath "release\$zipName" -CompressionLevel Optimal -Force
