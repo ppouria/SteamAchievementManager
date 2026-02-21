@@ -42,13 +42,25 @@ jobs:
         run: |
           $version = ""
           try {
-            $project = [xml](Get-Content "SAM.Picker/SAM.Picker.csproj")
-            $versionNode = $project.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
-            if ($null -ne $versionNode) {
-              $version = "$($versionNode.Version)".Trim()
+            $props = [xml](Get-Content "Directory.Build.props")
+            $samVersionNode = $props.Project.PropertyGroup | Where-Object { $_.SAMVersion } | Select-Object -First 1
+            if ($null -ne $samVersionNode) {
+              $version = "$($samVersionNode.SAMVersion)".Trim()
             }
           } catch {
             $version = ""
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            try {
+              $project = [xml](Get-Content "SAM.Picker/SAM.Picker.csproj")
+              $versionNode = $project.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
+              if ($null -ne $versionNode) {
+                $version = "$($versionNode.Version)".Trim()
+              }
+            } catch {
+              $version = ""
+            }
           }
 
           if ([string]::IsNullOrWhiteSpace($version)) {
@@ -88,18 +100,37 @@ jobs:
 
           $packageName = "SteamAchievementManager-$version"
           $zipName = "${packageName}.zip"
+          $packageRoot = Join-Path "package" $packageName
 
           New-Item -ItemType Directory -Path package -Force | Out-Null
           New-Item -ItemType Directory -Path release -Force | Out-Null
 
-          Copy-Item -Path LICENSE.txt -Destination package\LICENSE.txt -Force
-          git log --no-color --decorate=short > package\git-log.txt
-          Copy-Item -Path upload\* -Destination package -Force
+          if (Test-Path $packageRoot) {
+            Remove-Item -Path $packageRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 
-          Compress-Archive -Path package\* -DestinationPath "release\$zipName" -CompressionLevel Optimal -Force
+          Copy-Item -Path LICENSE.txt -Destination (Join-Path $packageRoot "LICENSE.txt") -Force
+
+          $releaseItems = @(
+            "upload/SAM.API.dll",
+            "upload/SAM.Game.exe",
+            "upload/SAM.Picker.exe",
+            "upload/data"
+          )
+
+          foreach ($item in $releaseItems) {
+            if (Test-Path $item) {
+              Copy-Item -Path $item -Destination $packageRoot -Recurse -Force
+            } else {
+              throw "Required release item not found: $item"
+            }
+          }
+
+          Compress-Archive -Path $packageRoot -DestinationPath "release\$zipName" -CompressionLevel Optimal -Force
 
           "artifact_name=$packageName" >> $env:GITHUB_OUTPUT
-          "artifact_path=package" >> $env:GITHUB_OUTPUT
+          "artifact_path=$packageRoot" >> $env:GITHUB_OUTPUT
           "zip_name=$zipName" >> $env:GITHUB_OUTPUT
           "zip_path=release/$zipName" >> $env:GITHUB_OUTPUT
 

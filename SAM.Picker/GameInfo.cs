@@ -42,6 +42,7 @@ namespace SAM.Picker
 
         public int AchievementUnlocked;
         public int AchievementTotal;
+        public bool? AchievementUnlockBlocked;
 
         public bool HasAchievementProgress => this.AchievementUnlocked >= 0 && this.AchievementTotal >= 0;
 
@@ -66,6 +67,7 @@ namespace SAM.Picker
             this.ImageUrl = null;
             this.AchievementUnlocked = -1;
             this.AchievementTotal = -1;
+            this.AchievementUnlockBlocked = null;
         }
     }
 }

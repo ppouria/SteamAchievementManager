@@ -31,6 +31,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
@@ -41,6 +42,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
+using Microsoft.Win32;
 using static SAM.Picker.InvariantShorthand;
 using APITypes = SAM.API.Types;
 
@@ -71,6 +73,13 @@ namespace SAM.Picker
             LocalCheckAll,
         }
 
+        private enum ThemeMode
+        {
+            System,
+            Light,
+            Dark,
+        }
+
         private readonly API.Client _SteamClient;
 
         private readonly Dictionary<uint, GameInfo> _Games;
@@ -96,6 +105,14 @@ namespace SAM.Picker
         private int _LoadingSpinnerFrame;
         private GameViewMode _ViewMode;
         private GameSortMode _SortMode;
+        private ThemeMode _ThemeMode;
+        private bool _IsDarkThemeActive;
+        private ToolStripRenderer _DarkToolStripRenderer;
+        private ToolStripRenderer _DarkStatusStripRenderer;
+        private readonly Dictionary<uint, AchievementStatusEntry> _AchievementStatusCache;
+        private DateTime _AchievementStatusCacheLastWriteUtc;
+        private DateTime _LastAchievementStatusSaveUtc;
+        private bool _PendingAchievementStatusSave;
 
         private sealed class AchievementScanRequest
         {
@@ -265,6 +282,76 @@ namespace SAM.Picker
 
             [DataMember(Name = "sort_mode")]
             public string SortMode { get; set; }
+
+            [DataMember(Name = "theme_mode")]
+            public string ThemeMode { get; set; }
+        }
+
+        [DataContract]
+        private sealed class LegacyThemePreferences
+        {
+            [DataMember(Name = "theme_mode")]
+            public string ThemeMode { get; set; }
+        }
+
+        private sealed class DarkToolStripColorTable : ProfessionalColorTable
+        {
+            private readonly Color _toolStripBackColor;
+            private readonly Color _menuBackColor;
+            private readonly Color _menuBorderColor;
+            private readonly Color _menuSelectedColor;
+            private readonly Color _menuPressedColor;
+            private readonly Color _separatorColor;
+
+            public DarkToolStripColorTable(
+                Color toolStripBackColor,
+                Color menuBackColor,
+                Color menuBorderColor,
+                Color menuSelectedColor,
+                Color menuPressedColor,
+                Color separatorColor)
+            {
+                this._toolStripBackColor = toolStripBackColor;
+                this._menuBackColor = menuBackColor;
+                this._menuBorderColor = menuBorderColor;
+                this._menuSelectedColor = menuSelectedColor;
+                this._menuPressedColor = menuPressedColor;
+                this._separatorColor = separatorColor;
+            }
+
+            public override Color ToolStripDropDownBackground => this._menuBackColor;
+            public override Color MenuBorder => this._menuBorderColor;
+            public override Color MenuItemBorder => this._menuBorderColor;
+            public override Color MenuItemSelected => this._menuSelectedColor;
+            public override Color MenuItemSelectedGradientBegin => this._menuSelectedColor;
+            public override Color MenuItemSelectedGradientEnd => this._menuSelectedColor;
+            public override Color MenuItemPressedGradientBegin => this._menuPressedColor;
+            public override Color MenuItemPressedGradientMiddle => this._menuPressedColor;
+            public override Color MenuItemPressedGradientEnd => this._menuPressedColor;
+            public override Color CheckBackground => this._menuSelectedColor;
+            public override Color CheckSelectedBackground => this._menuSelectedColor;
+            public override Color CheckPressedBackground => this._menuPressedColor;
+            public override Color ImageMarginGradientBegin => this._menuBackColor;
+            public override Color ImageMarginGradientMiddle => this._menuBackColor;
+            public override Color ImageMarginGradientEnd => this._menuBackColor;
+            public override Color SeparatorDark => this._separatorColor;
+            public override Color SeparatorLight => this._separatorColor;
+            public override Color ToolStripGradientBegin => this._toolStripBackColor;
+            public override Color ToolStripGradientMiddle => this._toolStripBackColor;
+            public override Color ToolStripGradientEnd => this._toolStripBackColor;
+            public override Color ToolStripBorder => this._toolStripBackColor;
+            public override Color MenuStripGradientBegin => this._toolStripBackColor;
+            public override Color MenuStripGradientEnd => this._toolStripBackColor;
+            public override Color StatusStripGradientBegin => this._toolStripBackColor;
+            public override Color StatusStripGradientEnd => this._toolStripBackColor;
+            public override Color ButtonSelectedBorder => this._menuBorderColor;
+            public override Color ButtonSelectedGradientBegin => this._menuSelectedColor;
+            public override Color ButtonSelectedGradientMiddle => this._menuSelectedColor;
+            public override Color ButtonSelectedGradientEnd => this._menuSelectedColor;
+            public override Color ButtonPressedGradientBegin => this._menuPressedColor;
+            public override Color ButtonPressedGradientMiddle => this._menuPressedColor;
+            public override Color ButtonPressedGradientEnd => this._menuPressedColor;
+            public override Color ButtonPressedBorder => this._menuBorderColor;
         }
 
         [DataContract]
@@ -306,6 +393,9 @@ namespace SAM.Picker
 
             [DataMember(Name = "has_incomplete_achievements")]
             public bool HasIncompleteAchievements { get; set; }
+
+            [DataMember(Name = "achievement_unlock_blocked")]
+            public bool AchievementUnlockBlocked { get; set; }
         }
 
         public GamePicker(API.Client client)
@@ -317,8 +407,8 @@ namespace SAM.Picker
             this._LogosAttempted = new();
             this._LogoQueue = new();
 
+            this._ThemeMode = ThemeMode.System;
             this.InitializeComponent();
-            this.ApplyModernTheme();
             this.UpdatePickerWindowTitle();
 
             this._UnlockAllWorker = new BackgroundWorker()
@@ -352,8 +442,11 @@ namespace SAM.Picker
             this._GameListView.Sorting = SortOrder.None;
             this._ViewMode = GameViewMode.Grid;
             this._SortMode = GameSortMode.NameAscending;
+            this._AchievementStatusCache = this.LoadAchievementStatusCache();
+            this._AchievementStatusCacheLastWriteUtc = GetAchievementStatusDatabaseLastWriteUtc();
 
             this.LoadPickerPreferences();
+            this.ApplyModernTheme();
             this.ApplyViewMode(this._ViewMode, false);
             this.ApplySortMode(this._SortMode, false, false);
 
@@ -379,12 +472,155 @@ namespace SAM.Picker
             this.Text = _($"Steam Achievement Manager {version} | Pick a game... Any game...");
         }
 
+        private static bool IsSystemDarkThemeEnabled()
+        {
+            try
+            {
+                using RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                object value = key?.GetValue("AppsUseLightTheme");
+                return value switch
+                {
+                    int intValue => intValue == 0,
+                    long longValue => longValue == 0,
+                    string textValue when int.TryParse(textValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) => parsed == 0,
+                    _ => false,
+                };
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
+
+        private void ApplyWindowDarkTitleBar()
+        {
+            if (this.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            int enabled = this._IsDarkThemeActive == true ? 1 : 0;
+            try
+            {
+                // 20 is used on current builds, 19 on older builds.
+                DwmSetWindowAttribute(this.Handle, 20, ref enabled, sizeof(int));
+                DwmSetWindowAttribute(this.Handle, 19, ref enabled, sizeof(int));
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+        }
+
+        private void ApplyDarkThemeToDropDown(ToolStripDropDownButton button, Color backColor, Color foreColor)
+        {
+            if (button == null || button.DropDown == null)
+            {
+                return;
+            }
+
+            if (this._IsDarkThemeActive == true && this._DarkToolStripRenderer != null)
+            {
+                button.DropDown.Renderer = this._DarkToolStripRenderer;
+            }
+            else
+            {
+                button.DropDown.RenderMode = ToolStripRenderMode.System;
+            }
+
+            button.DropDown.BackColor = backColor;
+            button.DropDown.ForeColor = foreColor;
+            foreach (ToolStripItem item in button.DropDownItems)
+            {
+                item.ForeColor = foreColor;
+                if (item is ToolStripSeparator separator)
+                {
+                    separator.ForeColor = backColor;
+                }
+            }
+        }
+
+        private void ApplyListViewScrollBarTheme()
+        {
+            if (this._GameListView == null || this._GameListView.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            if (this._GameListView is MyListView listView)
+            {
+                listView.UseDarkScrollBars = this._IsDarkThemeActive;
+                return;
+            }
+
+            try
+            {
+                SetWindowTheme(this._GameListView.Handle, this._IsDarkThemeActive == true ? "DarkMode_Explorer" : "Explorer", null);
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+            catch (DllNotFoundException)
+            {
+            }
+        }
+
+        private ThemeMode GetResolvedThemeMode()
+        {
+            if (this._ThemeMode == ThemeMode.System)
+            {
+                return IsSystemDarkThemeEnabled() == true
+                    ? ThemeMode.Dark
+                    : ThemeMode.Light;
+            }
+
+            return this._ThemeMode;
+        }
+
+        private void ApplyThemeMode(ThemeMode mode, bool persist)
+        {
+            this._ThemeMode = mode;
+            this.ApplyModernTheme();
+            if (persist == true)
+            {
+                this.SavePickerPreferences();
+            }
+        }
+
+        private void UpdateThemeMenuState()
+        {
+            this._ThemeSystemMenuItem.Checked = this._ThemeMode == ThemeMode.System;
+            this._ThemeLightMenuItem.Checked = this._ThemeMode == ThemeMode.Light;
+            this._ThemeDarkMenuItem.Checked = this._ThemeMode == ThemeMode.Dark;
+
+            string modeText = this._ThemeMode.ToString().ToLowerInvariant();
+            this._ThemeDropDownButton.Text = _($"Theme ({modeText})");
+        }
+
         private void ApplyModernTheme()
         {
             this.SuspendLayout();
 
-            this.BackColor = Color.FromArgb(242, 242, 247);
-            this.ForeColor = Color.FromArgb(24, 24, 28);
+            this._IsDarkThemeActive = this.GetResolvedThemeMode() == ThemeMode.Dark;
+
+            Color windowBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(30, 32, 37) : Color.FromArgb(242, 242, 247);
+            Color foregroundColor = this._IsDarkThemeActive == true ? Color.FromArgb(232, 235, 241) : Color.FromArgb(24, 24, 28);
+            Color mutedTextColor = this._IsDarkThemeActive == true ? Color.FromArgb(168, 173, 184) : Color.FromArgb(110, 110, 116);
+            Color inputBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(46, 49, 56) : Color.White;
+            Color toolStripBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(38, 40, 46) : Color.FromArgb(252, 252, 253);
+            Color statusBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 41) : Color.FromArgb(248, 248, 250);
+            Color listBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(36, 38, 44) : Color.White;
+
+            this.BackColor = windowBackColor;
+            this.ForeColor = foregroundColor;
             this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
             this.MinimumSize = new Size(1024, 640);
             if (this.ClientSize.Width < 1024 || this.ClientSize.Height < 640)
@@ -392,13 +628,39 @@ namespace SAM.Picker
                 this.ClientSize = new Size(1120, 720);
             }
 
-            this._PickerToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._PickerToolStrip.BackColor = toolStripBackColor;
             this._PickerToolStrip.ForeColor = this.ForeColor;
             this._PickerToolStrip.GripStyle = ToolStripGripStyle.Hidden;
             this._PickerToolStrip.Padding = new Padding(10, 6, 10, 6);
             this._PickerToolStrip.AutoSize = false;
             this._PickerToolStrip.Height = 44;
-            this._PickerToolStrip.RenderMode = ToolStripRenderMode.System;
+            if (this._IsDarkThemeActive == true)
+            {
+                DarkToolStripColorTable stripColorTable = new(
+                    toolStripBackColor,
+                    Color.FromArgb(43, 46, 54),
+                    Color.FromArgb(68, 73, 84),
+                    Color.FromArgb(67, 95, 150),
+                    Color.FromArgb(78, 111, 173),
+                    Color.FromArgb(56, 61, 70));
+                this._DarkToolStripRenderer = new ToolStripProfessionalRenderer(
+                    stripColorTable);
+                this._DarkStatusStripRenderer = new ToolStripProfessionalRenderer(
+                    new DarkToolStripColorTable(
+                        statusBackColor,
+                        Color.FromArgb(43, 46, 54),
+                        Color.FromArgb(68, 73, 84),
+                        Color.FromArgb(67, 95, 150),
+                        Color.FromArgb(78, 111, 173),
+                        Color.FromArgb(56, 61, 70)));
+                this._PickerToolStrip.Renderer = this._DarkToolStripRenderer;
+                this._PickerStatusStrip.Renderer = this._DarkStatusStripRenderer;
+            }
+            else
+            {
+                this._PickerToolStrip.RenderMode = ToolStripRenderMode.System;
+                this._PickerStatusStrip.RenderMode = ToolStripRenderMode.System;
+            }
 
             this.StyleToolStripButton(this._RefreshGamesButton);
             this.StyleToolStripButton(this._AddGameButton);
@@ -406,29 +668,24 @@ namespace SAM.Picker
             this.StyleToolStripButton(this._CheckAllButton);
             this.StyleToolStripButton(this._UnlockAllButton);
             this.StyleToolStripButton(this._UnlockSelectedButton);
+            this.StyleToolStripDropDownButton(this._FilterDropDownButton, "Filters");
+            this.StyleToolStripDropDownButton(this._ThemeDropDownButton, this._ThemeDropDownButton.Text);
 
             this._AddGameTextBox.AutoSize = false;
             this._AddGameTextBox.Size = new Size(96, 28);
             this._AddGameTextBox.BorderStyle = BorderStyle.FixedSingle;
-            this._AddGameTextBox.BackColor = Color.White;
+            this._AddGameTextBox.BackColor = inputBackColor;
             this._AddGameTextBox.ForeColor = this.ForeColor;
 
-            this._FindGamesLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._FindGamesLabel.ForeColor = mutedTextColor;
             this._FindGamesLabel.Margin = new Padding(6, 0, 0, 0);
             this._FindGamesLabel.Text = "Search";
 
             this._SearchGameTextBox.AutoSize = false;
             this._SearchGameTextBox.Size = new Size(180, 28);
             this._SearchGameTextBox.BorderStyle = BorderStyle.FixedSingle;
-            this._SearchGameTextBox.BackColor = Color.White;
+            this._SearchGameTextBox.BackColor = inputBackColor;
             this._SearchGameTextBox.ForeColor = this.ForeColor;
-
-            this._FilterDropDownButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            this._FilterDropDownButton.Image = null;
-            this._FilterDropDownButton.Text = "Filters";
-            this._FilterDropDownButton.ForeColor = this.ForeColor;
-            this._FilterDropDownButton.Padding = new Padding(8, 0, 8, 0);
-            this._FilterDropDownButton.Margin = new Padding(4, 0, 0, 0);
 
             foreach (ToolStripItem item in this._PickerToolStrip.Items)
             {
@@ -441,21 +698,42 @@ namespace SAM.Picker
             foreach (ToolStripItem item in this._FilterDropDownButton.DropDownItems)
             {
                 item.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+                item.ForeColor = this.ForeColor;
             }
 
-            this._FilterLoadingLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            foreach (ToolStripItem item in this._ThemeDropDownButton.DropDownItems)
+            {
+                item.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+                item.ForeColor = this.ForeColor;
+            }
+
+            this.ApplyDarkThemeToDropDown(
+                this._FilterDropDownButton,
+                this._IsDarkThemeActive == true ? Color.FromArgb(43, 46, 54) : Color.White,
+                this.ForeColor);
+            this.ApplyDarkThemeToDropDown(
+                this._ThemeDropDownButton,
+                this._IsDarkThemeActive == true ? Color.FromArgb(43, 46, 54) : Color.White,
+                this.ForeColor);
+
+            this._FilterLoadingLabel.ForeColor = mutedTextColor;
             this._FilterLoadingLabel.Alignment = ToolStripItemAlignment.Right;
 
-            this._GameListView.BackColor = Color.White;
+            this._GameListView.BackColor = listBackColor;
             this._GameListView.ForeColor = this.ForeColor;
             this._GameListView.BorderStyle = BorderStyle.None;
             this._GameListView.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
 
             this._PickerStatusStrip.SizingGrip = false;
-            this._PickerStatusStrip.BackColor = Color.FromArgb(248, 248, 250);
-            this._PickerStatusStrip.ForeColor = Color.FromArgb(110, 110, 116);
-            this._PickerStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
-            this._DownloadStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._PickerStatusStrip.BackColor = statusBackColor;
+            this._PickerStatusStrip.ForeColor = mutedTextColor;
+            this._PickerStatusLabel.ForeColor = mutedTextColor;
+            this._DownloadStatusLabel.ForeColor = mutedTextColor;
+
+            this.ApplyWindowDarkTitleBar();
+            this.ApplyListViewScrollBarTheme();
+            this.UpdateThemeMenuState();
+            this._GameListView.Invalidate();
 
             this.ResumeLayout(true);
         }
@@ -480,6 +758,36 @@ namespace SAM.Picker
             }
 
             button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+        }
+
+        private void StyleToolStripDropDownButton(ToolStripDropDownButton button, string text)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            button.Image = null;
+            button.Text = text;
+            button.ForeColor = this.ForeColor;
+            button.Padding = new Padding(8, 0, 8, 0);
+            button.Margin = new Padding(4, 0, 0, 0);
+        }
+
+        private void OnThemeSystem(object sender, EventArgs e)
+        {
+            this.ApplyThemeMode(ThemeMode.System, true);
+        }
+
+        private void OnThemeLight(object sender, EventArgs e)
+        {
+            this.ApplyThemeMode(ThemeMode.Light, true);
+        }
+
+        private void OnThemeDark(object sender, EventArgs e)
+        {
+            this.ApplyThemeMode(ThemeMode.Dark, true);
         }
 
         private void SetPickerStatusTextSafe(string text)
@@ -1370,6 +1678,37 @@ namespace SAM.Picker
             return false;
         }
 
+        private static bool TryParseAppIdFromAddGameInput(string text, out uint appId)
+        {
+            appId = 0;
+            if (string.IsNullOrWhiteSpace(text) == true)
+            {
+                return false;
+            }
+
+            string input = text.Trim();
+            if (uint.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out appId) == true &&
+                appId != 0)
+            {
+                return true;
+            }
+
+            Match match = Regex.Match(
+                input,
+                @"(?:https?://)?(?:www\.)?store\.steampowered\.com/app/(?<id>\d+)(?:[/?#]|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (match.Success == false)
+            {
+                return false;
+            }
+
+            return uint.TryParse(
+                match.Groups["id"].Value,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out appId) == true && appId != 0;
+        }
+
         private void OnDownloadList(object sender, RunWorkerCompletedEventArgs e)
         {
             if (e.Error != null || e.Cancelled == true)
@@ -1385,6 +1724,7 @@ namespace SAM.Picker
                 return;
             }
 
+            this.ApplyCachedAchievementStatusToGames();
             this.RefreshGames();
             this._RefreshGamesButton.Enabled = true;
             this.StartAchievementScan();
@@ -1609,6 +1949,15 @@ namespace SAM.Picker
                 Text = info.DisplayName,
                 ImageIndex = info.ImageIndex,
             };
+            if (info.AchievementUnlockBlocked == true)
+            {
+                e.Item.BackColor = this._IsDarkThemeActive == true
+                    ? Color.FromArgb(92, 46, 52)
+                    : Color.FromArgb(255, 226, 229);
+                e.Item.ForeColor = this._IsDarkThemeActive == true
+                    ? Color.FromArgb(255, 203, 211)
+                    : Color.FromArgb(132, 17, 31);
+            }
 
             if (info.ImageIndex <= 0)
             {
@@ -1840,9 +2189,326 @@ namespace SAM.Picker
             return Path.Combine(Application.StartupPath, "sam-picker-preferences.json");
         }
 
+        private static string GetLegacyThemePreferencesPath()
+        {
+            return Path.Combine(Application.StartupPath, "sam-theme-preferences.json");
+        }
+
+        private static bool TryLoadLegacyThemeModePreference(out ThemeMode mode)
+        {
+            mode = ThemeMode.System;
+            string path = GetLegacyThemePreferencesPath();
+            if (File.Exists(path) == false)
+            {
+                return false;
+            }
+
+            try
+            {
+                using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                DataContractJsonSerializer serializer = new(typeof(LegacyThemePreferences));
+                if (serializer.ReadObject(stream) is not LegacyThemePreferences preferences ||
+                    Enum.TryParse(preferences.ThemeMode, true, out ThemeMode parsedMode) == false)
+                {
+                    return false;
+                }
+
+                mode = parsedMode;
+                return true;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+            catch (InvalidCastException)
+            {
+            }
+
+            return false;
+        }
+
         private static string GetAchievementStatusDatabasePath()
         {
             return Path.Combine(Application.StartupPath, "data", "games", "achievements", "status.json");
+        }
+
+        private static DateTime GetAchievementStatusDatabaseLastWriteUtc()
+        {
+            string path = GetAchievementStatusDatabasePath();
+            if (File.Exists(path) == false)
+            {
+                return DateTime.MinValue;
+            }
+
+            try
+            {
+                return File.GetLastWriteTimeUtc(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            return DateTime.MinValue;
+        }
+
+        private static bool TryReadAchievementStatusDatabase(string path, out AchievementStatusDatabase database)
+        {
+            database = null;
+            if (string.IsNullOrWhiteSpace(path) == true || File.Exists(path) == false)
+            {
+                return false;
+            }
+
+            try
+            {
+                using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                database = serializer.ReadObject(stream) as AchievementStatusDatabase;
+                return database != null;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+            catch (InvalidCastException)
+            {
+            }
+
+            return false;
+        }
+
+        private static AchievementStatusEntry CloneAchievementStatusEntry(AchievementStatusEntry entry)
+        {
+            if (entry == null)
+            {
+                return null;
+            }
+
+            return new AchievementStatusEntry()
+            {
+                AppId = entry.AppId,
+                Name = entry.Name,
+                Type = entry.Type,
+                AchievementUnlocked = entry.AchievementUnlocked,
+                AchievementTotal = entry.AchievementTotal,
+                HasProgress = entry.HasProgress,
+                HasIncompleteAchievements = entry.HasIncompleteAchievements,
+                AchievementUnlockBlocked = entry.AchievementUnlockBlocked,
+            };
+        }
+
+        private static bool TryGetValidAchievementProgress(
+            int unlocked,
+            int total,
+            out int normalizedUnlocked,
+            out int normalizedTotal)
+        {
+            normalizedUnlocked = -1;
+            normalizedTotal = -1;
+
+            if (unlocked < 0 || total < 0)
+            {
+                return false;
+            }
+
+            if (unlocked > total)
+            {
+                unlocked = total;
+            }
+
+            normalizedUnlocked = unlocked;
+            normalizedTotal = total;
+            return true;
+        }
+
+        private static bool TryGetValidAchievementProgress(
+            AchievementStatusEntry entry,
+            out int normalizedUnlocked,
+            out int normalizedTotal)
+        {
+            normalizedUnlocked = -1;
+            normalizedTotal = -1;
+            if (entry == null)
+            {
+                return false;
+            }
+
+            return TryGetValidAchievementProgress(
+                entry.AchievementUnlocked,
+                entry.AchievementTotal,
+                out normalizedUnlocked,
+                out normalizedTotal);
+        }
+
+        private Dictionary<uint, AchievementStatusEntry> LoadAchievementStatusCache()
+        {
+            Dictionary<uint, AchievementStatusEntry> cache = new();
+            string path = GetAchievementStatusDatabasePath();
+            if (TryReadAchievementStatusDatabase(path, out AchievementStatusDatabase database) == false ||
+                database == null)
+            {
+                return cache;
+            }
+
+            ulong steamId = this._SteamClient.SteamUser.GetSteamId();
+            if (database.SteamId != 0 && steamId != 0 && database.SteamId != steamId)
+            {
+                return cache;
+            }
+
+            foreach (AchievementStatusEntry item in database.Games ?? Array.Empty<AchievementStatusEntry>())
+            {
+                if (item == null || item.AppId == 0)
+                {
+                    continue;
+                }
+
+                AchievementStatusEntry copy = CloneAchievementStatusEntry(item);
+                if (TryGetValidAchievementProgress(copy, out int unlocked, out int total) == true)
+                {
+                    copy.AchievementUnlocked = unlocked;
+                    copy.AchievementTotal = total;
+                    copy.HasProgress = true;
+                    copy.HasIncompleteAchievements = total > 0 && unlocked < total;
+                }
+                else
+                {
+                    copy.AchievementUnlocked = -1;
+                    copy.AchievementTotal = -1;
+                    copy.HasProgress = false;
+                    copy.HasIncompleteAchievements = false;
+                }
+
+                cache[copy.AppId] = copy;
+            }
+
+            return cache;
+        }
+
+        private bool TryApplyCachedAchievementStatus(GameInfo info, bool forceProgressUpdate = false)
+        {
+            if (info == null ||
+                this._AchievementStatusCache == null ||
+                this._AchievementStatusCache.TryGetValue(info.Id, out AchievementStatusEntry entry) == false)
+            {
+                return false;
+            }
+
+            info.AchievementUnlockBlocked = entry.AchievementUnlockBlocked;
+            if (TryGetValidAchievementProgress(entry, out int unlocked, out int total) == false)
+            {
+                return false;
+            }
+
+            if (forceProgressUpdate == true || info.HasAchievementProgress == false)
+            {
+                info.AchievementUnlocked = unlocked;
+                info.AchievementTotal = total;
+            }
+            return true;
+        }
+
+        private void ApplyCachedAchievementStatusToGames(bool forceProgressUpdate = false)
+        {
+            if (this._Games.Count == 0 || this._AchievementStatusCache.Count == 0)
+            {
+                return;
+            }
+
+            foreach (GameInfo info in this._Games.Values)
+            {
+                if (info == null)
+                {
+                    continue;
+                }
+
+                this.TryApplyCachedAchievementStatus(info, forceProgressUpdate);
+            }
+        }
+
+        private bool TryReloadAchievementStatusCacheFromDiskIfNewer(bool forceProgressUpdate)
+        {
+            if (this._ListWorker.IsBusy == true)
+            {
+                return false;
+            }
+
+            DateTime lastWriteUtc = GetAchievementStatusDatabaseLastWriteUtc();
+            if (lastWriteUtc <= this._AchievementStatusCacheLastWriteUtc)
+            {
+                return false;
+            }
+
+            Dictionary<uint, AchievementStatusEntry> refreshedCache = this.LoadAchievementStatusCache();
+            this._AchievementStatusCache.Clear();
+            foreach (KeyValuePair<uint, AchievementStatusEntry> pair in refreshedCache)
+            {
+                this._AchievementStatusCache[pair.Key] = pair.Value;
+            }
+
+            this._AchievementStatusCacheLastWriteUtc = lastWriteUtc;
+
+            if (this._Games.Count == 0)
+            {
+                return true;
+            }
+
+            this.ApplyCachedAchievementStatusToGames(forceProgressUpdate);
+            this.RefreshGames();
+            return true;
+        }
+
+        private void QueueAchievementStatusDatabaseSave(bool force)
+        {
+            if (force == true)
+            {
+                this._PendingAchievementStatusSave = false;
+                this.SaveAchievementStatusDatabase();
+                this._LastAchievementStatusSaveUtc = DateTime.UtcNow;
+                return;
+            }
+
+            this._PendingAchievementStatusSave = true;
+            this.TryFlushPendingAchievementStatusSave(false);
+        }
+
+        private void TryFlushPendingAchievementStatusSave(bool force)
+        {
+            if (this._PendingAchievementStatusSave == false && force == false)
+            {
+                return;
+            }
+
+            if (this._ListWorker.IsBusy == true && force == false)
+            {
+                return;
+            }
+
+            if (force == false)
+            {
+                TimeSpan elapsed = DateTime.UtcNow - this._LastAchievementStatusSaveUtc;
+                if (elapsed.TotalMilliseconds < 450)
+                {
+                    return;
+                }
+            }
+
+            this._PendingAchievementStatusSave = false;
+            this.SaveAchievementStatusDatabase();
+            this._LastAchievementStatusSaveUtc = DateTime.UtcNow;
         }
 
         private void SaveAchievementStatusDatabase()
@@ -1856,31 +2522,138 @@ namespace SAM.Picker
                     Directory.CreateDirectory(directory);
                 }
 
-                AchievementStatusEntry[] entries = this._Games.Values
-                    .OrderBy(game => game.Name, StringComparer.CurrentCultureIgnoreCase)
-                    .Select(game => new AchievementStatusEntry()
+                ulong steamId = this._SteamClient.SteamUser.GetSteamId();
+                Dictionary<uint, AchievementStatusEntry> entriesByAppId = new();
+                if (TryReadAchievementStatusDatabase(path, out AchievementStatusDatabase existingDatabase) == true &&
+                    existingDatabase != null &&
+                    (existingDatabase.SteamId == 0 || steamId == 0 || existingDatabase.SteamId == steamId))
+                {
+                    foreach (AchievementStatusEntry existingEntry in existingDatabase.Games ?? Array.Empty<AchievementStatusEntry>())
                     {
-                        AppId = game.Id,
-                        Name = game.Name,
-                        Type = game.Type,
-                        AchievementUnlocked = game.AchievementUnlocked,
-                        AchievementTotal = game.AchievementTotal,
-                        HasProgress = game.HasAchievementProgress,
-                        HasIncompleteAchievements = game.HasIncompleteAchievements,
+                        if (existingEntry == null || existingEntry.AppId == 0)
+                        {
+                            continue;
+                        }
+
+                        entriesByAppId[existingEntry.AppId] = CloneAchievementStatusEntry(existingEntry);
+                    }
+                }
+
+                foreach (GameInfo game in this._Games.Values)
+                {
+                    if (game == null || game.Id == 0)
+                    {
+                        continue;
+                    }
+
+                    entriesByAppId.TryGetValue(game.Id, out AchievementStatusEntry entry);
+                    entry ??= new AchievementStatusEntry();
+
+                    bool hasProgress = TryGetValidAchievementProgress(
+                        game.AchievementUnlocked,
+                        game.AchievementTotal,
+                        out int unlocked,
+                        out int total);
+                    if (hasProgress == false &&
+                        TryGetValidAchievementProgress(entry, out int cachedUnlocked, out int cachedTotal) == true)
+                    {
+                        unlocked = cachedUnlocked;
+                        total = cachedTotal;
+                        hasProgress = true;
+                        game.AchievementUnlocked = cachedUnlocked;
+                        game.AchievementTotal = cachedTotal;
+                    }
+
+                    entry.AppId = game.Id;
+                    entry.Name = string.IsNullOrWhiteSpace(game.Name) == false
+                        ? game.Name
+                        : string.IsNullOrWhiteSpace(entry.Name) == false
+                            ? entry.Name
+                            : "App " + game.Id.ToString(CultureInfo.InvariantCulture);
+                    entry.Type = string.IsNullOrWhiteSpace(game.Type) == false
+                        ? game.Type
+                        : string.IsNullOrWhiteSpace(entry.Type) == false
+                            ? entry.Type
+                            : "normal";
+                    if (game.AchievementUnlockBlocked.HasValue == true)
+                    {
+                        entry.AchievementUnlockBlocked = game.AchievementUnlockBlocked.Value;
+                    }
+                    else
+                    {
+                        game.AchievementUnlockBlocked = entry.AchievementUnlockBlocked;
+                    }
+                    if (hasProgress == true)
+                    {
+                        entry.AchievementUnlocked = unlocked;
+                        entry.AchievementTotal = total;
+                        entry.HasProgress = true;
+                        entry.HasIncompleteAchievements = total > 0 && unlocked < total;
+                    }
+                    else
+                    {
+                        entry.AchievementUnlocked = -1;
+                        entry.AchievementTotal = -1;
+                        entry.HasProgress = false;
+                        entry.HasIncompleteAchievements = false;
+                    }
+
+                    entriesByAppId[entry.AppId] = entry;
+                }
+
+                AchievementStatusEntry[] entries = entriesByAppId.Values
+                    .Where(entry => entry != null && entry.AppId != 0)
+                    .Select(entry =>
+                    {
+                        AchievementStatusEntry copy = CloneAchievementStatusEntry(entry);
+                        if (TryGetValidAchievementProgress(copy, out int unlocked, out int total) == true)
+                        {
+                            copy.AchievementUnlocked = unlocked;
+                            copy.AchievementTotal = total;
+                            copy.HasProgress = true;
+                            copy.HasIncompleteAchievements = total > 0 && unlocked < total;
+                        }
+                        else
+                        {
+                            copy.AchievementUnlocked = -1;
+                            copy.AchievementTotal = -1;
+                            copy.HasProgress = false;
+                            copy.HasIncompleteAchievements = false;
+                        }
+
+                        copy.Name = string.IsNullOrWhiteSpace(copy.Name) == false
+                            ? copy.Name.Trim()
+                            : "App " + copy.AppId.ToString(CultureInfo.InvariantCulture);
+                        copy.Type = string.IsNullOrWhiteSpace(copy.Type) == false
+                            ? copy.Type.Trim()
+                            : "normal";
+                        return copy;
                     })
+                    .OrderBy(entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(entry => entry.AppId)
                     .ToArray();
 
                 AchievementStatusDatabase payload = new()
                 {
                     GeneratedUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                    SteamId = this._SteamClient.SteamUser.GetSteamId(),
+                    SteamId = steamId,
                     ScanMode = this.GetActiveScanModeLabel(),
                     Games = entries,
                 };
 
-                using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.Read);
-                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
-                serializer.WriteObject(stream, payload);
+                using (FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                    DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                    serializer.WriteObject(stream, payload);
+                }
+
+                this._AchievementStatusCacheLastWriteUtc = GetAchievementStatusDatabaseLastWriteUtc();
+
+                this._AchievementStatusCache.Clear();
+                foreach (AchievementStatusEntry entry in entries)
+                {
+                    this._AchievementStatusCache[entry.AppId] = CloneAchievementStatusEntry(entry);
+                }
 
                 AppendAchievementScanLog(0, $"Saved achievement database to {path}.");
             }
@@ -1895,6 +2668,10 @@ namespace SAM.Picker
             catch (SerializationException ex)
             {
                 AppendAchievementScanLog(0, $"Failed to serialize achievement database: {ex.Message}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AppendAchievementScanLog(0, $"Failed to update achievement database: {ex.Message}");
             }
         }
 
@@ -1924,6 +2701,16 @@ namespace SAM.Picker
                 {
                     this._SortMode = sortMode;
                 }
+
+                if (Enum.TryParse(preferences.ThemeMode, true, out ThemeMode themeMode) == true)
+                {
+                    this._ThemeMode = themeMode;
+                }
+                else if (TryLoadLegacyThemeModePreference(out ThemeMode legacyThemeMode) == true)
+                {
+                    this._ThemeMode = legacyThemeMode;
+                    this.SavePickerPreferences();
+                }
             }
             catch (IOException)
             {
@@ -1947,6 +2734,7 @@ namespace SAM.Picker
                 {
                     ViewMode = this._ViewMode.ToString(),
                     SortMode = this._SortMode.ToString(),
+                    ThemeMode = this._ThemeMode.ToString(),
                 };
 
                 using FileStream stream = new(GetPickerPreferencesPath(), FileMode.Create, FileAccess.Write, FileShare.Read);
@@ -2305,6 +3093,7 @@ namespace SAM.Picker
             {
                 game.AchievementUnlocked = progress.Unlocked;
                 game.AchievementTotal = progress.Total;
+                this.QueueAchievementStatusDatabaseSave(false);
             }
 
             if (progress.Success == true)
@@ -2354,7 +3143,7 @@ namespace SAM.Picker
                 this._GameListView.Invalidate();
             }
 
-            this.SaveAchievementStatusDatabase();
+            this.QueueAchievementStatusDatabaseSave(true);
             this.UpdatePickerStatus();
 
             if (this._AchievementScanPending == true)
@@ -2509,8 +3298,12 @@ namespace SAM.Picker
 
             if (this._Games.TryGetValue(progress.GameId, out var game) == true)
             {
-                game.AchievementUnlocked = progress.Unlocked;
-                game.AchievementTotal = progress.Total;
+                if (progress.Unlocked >= 0 && progress.Total >= 0)
+                {
+                    game.AchievementUnlocked = progress.Unlocked;
+                    game.AchievementTotal = progress.Total;
+                    this.QueueAchievementStatusDatabaseSave(false);
+                }
             }
 
             if (this._FilterIncompleteAchievementsMenuItem.Checked == true)
@@ -2542,7 +3335,7 @@ namespace SAM.Picker
                 this.StartAchievementScan();
             }
 
-            this.SaveAchievementStatusDatabase();
+            this.QueueAchievementStatusDatabaseSave(true);
             this._CurrentAchievementScanMode = AchievementScanMode.Auto;
             this.UpdatePickerStatus();
         }
@@ -3384,6 +4177,7 @@ namespace SAM.Picker
         {
             if (this._Games.TryGetValue(id, out var existing) == true)
             {
+                this.TryApplyCachedAchievementStatus(existing);
                 return existing;
             }
 
@@ -3397,6 +4191,7 @@ namespace SAM.Picker
                 info.Name = this._SteamClient.SteamApps001.GetAppData(info.Id, "name");
             }
 
+            this.TryApplyCachedAchievementStatus(info);
             this._Games.Add(id, info);
             return info;
         }
@@ -3460,6 +4255,26 @@ namespace SAM.Picker
             this._CallbackTimer.Enabled = false;
             this._SteamClient.RunCallbacks(false);
             this._CallbackTimer.Enabled = true;
+            this.TryFlushPendingAchievementStatusSave(false);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            this.TryFlushPendingAchievementStatusSave(true);
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            this.ApplyWindowDarkTitleBar();
+            this.ApplyListViewScrollBarTheme();
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            this.TryReloadAchievementStatusCacheFromDiskIfNewer(true);
         }
 
         private void OnActivateGame(object sender, EventArgs e)
@@ -3480,13 +4295,18 @@ namespace SAM.Picker
             try
             {
                 string managerPath = Path.Combine(Application.StartupPath, "SAM.Game.exe");
-                Process.Start(new ProcessStartInfo()
+                Process managerProcess = Process.Start(new ProcessStartInfo()
                 {
                     FileName = managerPath,
                     Arguments = info.Id.ToString(CultureInfo.InvariantCulture),
                     WorkingDirectory = Application.StartupPath,
                     UseShellExecute = true,
                 });
+                if (managerProcess != null)
+                {
+                    managerProcess.EnableRaisingEvents = true;
+                    managerProcess.Exited += this.OnGameManagerExited;
+                }
             }
             catch (Win32Exception)
             {
@@ -3562,11 +4382,11 @@ namespace SAM.Picker
         {
             uint id;
 
-            if (uint.TryParse(this._AddGameTextBox.Text, out id) == false)
+            if (TryParseAppIdFromAddGameInput(this._AddGameTextBox.Text, out id) == false)
             {
                 MessageBox.Show(
                     this,
-                    "Please enter a valid game ID.",
+                    "Please enter a valid game ID or Steam store URL.",
                     "Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -3681,6 +4501,34 @@ namespace SAM.Picker
             }
         }
 
+        private void OnGameManagerExited(object sender, EventArgs e)
+        {
+            if (sender is Process process)
+            {
+                process.Exited -= this.OnGameManagerExited;
+                process.Dispose();
+            }
+
+            if (this.IsDisposed == true || this.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            try
+            {
+                this.BeginInvoke((Action)(() =>
+                {
+                    if (this.IsDisposed == false)
+                    {
+                        this.TryReloadAchievementStatusCacheFromDiskIfNewer(true);
+                    }
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
@@ -3722,12 +4570,21 @@ namespace SAM.Picker
             }
 
             bool selected = this._GameListView.SelectedIndices.Contains(e.ItemIndex);
-            Color cardColor = selected == true
-                ? Color.FromArgb(220, 233, 255)
-                : Color.White;
-            Color borderColor = selected == true
-                ? Color.FromArgb(72, 124, 244)
-                : Color.FromArgb(226, 228, 233);
+            bool blocked = info.AchievementUnlockBlocked == true;
+            Color cardColor = blocked == true
+                ? (selected == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(130, 56, 65) : Color.FromArgb(255, 210, 216))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(92, 46, 52) : Color.FromArgb(255, 226, 229)))
+                : (selected == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(59, 97, 168) : Color.FromArgb(220, 233, 255))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(45, 48, 56) : Color.White));
+            Color borderColor = blocked == true
+                ? (selected == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 156, 170) : Color.FromArgb(220, 84, 102))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(206, 101, 115) : Color.FromArgb(231, 145, 157)))
+                : (selected == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(114, 162, 255) : Color.FromArgb(72, 124, 244))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(62, 67, 76) : Color.FromArgb(226, 228, 233)));
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (GraphicsPath path = CreateRoundedRectanglePath(cardRect, 10))
@@ -3768,8 +4625,12 @@ namespace SAM.Picker
                 FormatFlags = StringFormatFlags.NoWrap,
             })
             using (SolidBrush textBrush = new(selected == true
-                ? Color.FromArgb(19, 52, 128)
-                : Color.FromArgb(30, 30, 34)))
+                ? (blocked == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 244, 246) : Color.FromArgb(118, 10, 24))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(245, 248, 255) : Color.FromArgb(19, 52, 128)))
+                : (blocked == true
+                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 214, 220) : Color.FromArgb(126, 24, 36))
+                    : (this._IsDarkThemeActive == true ? Color.FromArgb(224, 228, 236) : Color.FromArgb(30, 30, 34)))))
             {
                 e.Graphics.DrawString(info.DisplayName, this._GameListView.Font, textBrush, textRect, format);
             }

@@ -28,11 +28,34 @@ namespace SAM.Picker
 {
     internal class MyListView : ListView
     {
+        private bool _UseDarkScrollBars;
+
         public event ScrollEventHandler Scroll;
 
         public MyListView()
         {
             base.DoubleBuffered = true;
+        }
+
+        public bool UseDarkScrollBars
+        {
+            get => this._UseDarkScrollBars;
+            set
+            {
+                if (this._UseDarkScrollBars == value)
+                {
+                    return;
+                }
+
+                this._UseDarkScrollBars = value;
+                this.ApplyScrollBarTheme();
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            this.ApplyScrollBarTheme();
         }
 
         protected virtual void OnScroll(ScrollEventArgs e)
@@ -110,10 +133,34 @@ namespace SAM.Picker
             return false;
         }
 
+        private void ApplyScrollBarTheme()
+        {
+            if (this.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            try
+            {
+                Win32.SetWindowTheme(this.Handle, this._UseDarkScrollBars == true ? "DarkMode_Explorer" : "Explorer", null);
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+
+            this.Invalidate();
+        }
+
         private static class Win32
         {
             [DllImport("user32.dll", SetLastError = true)]
             public static extern int GetScrollPos(IntPtr hWnd, int nBar);
+
+            [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+            public static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
         }
     }
 }

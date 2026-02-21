@@ -28,9 +28,11 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using static SAM.Game.InvariantShorthand;
 using APITypes = SAM.API.Types;
 
@@ -38,6 +40,13 @@ namespace SAM.Game
 {
     internal partial class Manager : Form
     {
+        private enum ThemeMode
+        {
+            System,
+            Light,
+            Dark,
+        }
+
         private readonly long _GameId;
         private readonly API.Client _SteamClient;
 
@@ -53,8 +62,106 @@ namespace SAM.Game
         private readonly BindingList<Stats.StatInfo> _Statistics = new();
 
         private readonly API.Callbacks.UserStatsReceived _UserStatsReceivedCallback;
+        private ThemeMode _ThemeMode;
+        private bool _IsDarkThemeActive;
+        private ToolStripRenderer _DarkToolStripRenderer;
+        private ToolStripRenderer _DarkStatusStripRenderer;
+        private Color _AchievementItemBackColor;
+        private Color _AchievementItemForeColor;
+        private Color _ProtectedAchievementBackColor;
+        private Color _ProtectedAchievementForeColor;
+        private Color _TabSelectedBackColor;
+        private Color _TabSelectedForeColor;
+        private Color _TabUnselectedBackColor;
+        private Color _TabUnselectedForeColor;
+        private Color _TabBorderColor;
+        private readonly Random _TimedUnlockRandom = new();
+        private readonly List<string> _TimedUnlockPendingAchievementIds = new();
+        private readonly List<TimeSpan> _TimedUnlockIntervals = new();
+        private TimeSpan _TimedUnlockTargetDuration;
+        private DateTime _TimedUnlockStartedUtc;
+        private DateTime _TimedUnlockNextUnlockUtc;
+        private DateTime _TimedUnlockLastCountdownUpdateUtc;
+        private int _TimedUnlockTotalPlanned;
+        private int _TimedUnlockCompleted;
+        private bool _TimedUnlockRunning;
+        private bool _TimedUnlockBusy;
 
         //private API.Callback<APITypes.UserStatsStored> UserStatsStoredCallback;
+
+        [DataContract]
+        private sealed class PickerPreferences
+        {
+            [DataMember(Name = "theme_mode")]
+            public string ThemeMode { get; set; }
+        }
+
+        [DataContract]
+        private sealed class LegacyThemePreferences
+        {
+            [DataMember(Name = "theme_mode")]
+            public string ThemeMode { get; set; }
+        }
+
+        private sealed class DarkToolStripColorTable : ProfessionalColorTable
+        {
+            private readonly Color _toolStripBackColor;
+            private readonly Color _menuBackColor;
+            private readonly Color _menuBorderColor;
+            private readonly Color _menuSelectedColor;
+            private readonly Color _menuPressedColor;
+            private readonly Color _separatorColor;
+
+            public DarkToolStripColorTable(
+                Color toolStripBackColor,
+                Color menuBackColor,
+                Color menuBorderColor,
+                Color menuSelectedColor,
+                Color menuPressedColor,
+                Color separatorColor)
+            {
+                this._toolStripBackColor = toolStripBackColor;
+                this._menuBackColor = menuBackColor;
+                this._menuBorderColor = menuBorderColor;
+                this._menuSelectedColor = menuSelectedColor;
+                this._menuPressedColor = menuPressedColor;
+                this._separatorColor = separatorColor;
+            }
+
+            public override Color ToolStripDropDownBackground => this._menuBackColor;
+            public override Color MenuBorder => this._menuBorderColor;
+            public override Color MenuItemBorder => this._menuBorderColor;
+            public override Color MenuItemSelected => this._menuSelectedColor;
+            public override Color MenuItemSelectedGradientBegin => this._menuSelectedColor;
+            public override Color MenuItemSelectedGradientEnd => this._menuSelectedColor;
+            public override Color MenuItemPressedGradientBegin => this._menuPressedColor;
+            public override Color MenuItemPressedGradientMiddle => this._menuPressedColor;
+            public override Color MenuItemPressedGradientEnd => this._menuPressedColor;
+            public override Color CheckBackground => this._menuSelectedColor;
+            public override Color CheckSelectedBackground => this._menuSelectedColor;
+            public override Color CheckPressedBackground => this._menuPressedColor;
+            public override Color ImageMarginGradientBegin => this._menuBackColor;
+            public override Color ImageMarginGradientMiddle => this._menuBackColor;
+            public override Color ImageMarginGradientEnd => this._menuBackColor;
+            public override Color SeparatorDark => this._separatorColor;
+            public override Color SeparatorLight => this._separatorColor;
+            public override Color ToolStripGradientBegin => this._toolStripBackColor;
+            public override Color ToolStripGradientMiddle => this._toolStripBackColor;
+            public override Color ToolStripGradientEnd => this._toolStripBackColor;
+            public override Color ToolStripBorder => this._toolStripBackColor;
+            public override Color MenuStripGradientBegin => this._toolStripBackColor;
+            public override Color MenuStripGradientEnd => this._toolStripBackColor;
+            public override Color StatusStripGradientBegin => this._toolStripBackColor;
+            public override Color StatusStripGradientEnd => this._toolStripBackColor;
+            public override Color ButtonSelectedBorder => this._menuBorderColor;
+            public override Color ButtonSelectedGradientBegin => this._menuSelectedColor;
+            public override Color ButtonSelectedGradientMiddle => this._menuSelectedColor;
+            public override Color ButtonSelectedGradientEnd => this._menuSelectedColor;
+            public override Color ButtonPressedGradientBegin => this._menuPressedColor;
+            public override Color ButtonPressedGradientMiddle => this._menuPressedColor;
+            public override Color ButtonPressedGradientEnd => this._menuPressedColor;
+            public override Color ButtonPressedBorder => this._menuBorderColor;
+        }
 
         [DataContract]
         private sealed class AchievementStatusDatabase
@@ -95,14 +202,21 @@ namespace SAM.Game
 
             [DataMember(Name = "has_incomplete_achievements")]
             public bool HasIncompleteAchievements { get; set; }
+
+            [DataMember(Name = "achievement_unlock_blocked")]
+            public bool AchievementUnlockBlocked { get; set; }
         }
 
         public Manager(long gameId, API.Client client)
         {
+            this._ThemeMode = LoadThemeModeFromPickerPreferences();
             this.InitializeComponent();
             this.Text = BuildManagerWindowTitle();
             this.ApplyModernTheme();
             this._AutoSelectCountTextBox.Text = "25";
+            this._TimedUnlockHoursTextBox.Text = "72";
+            this._MainTabControl.DrawItem += this.OnMainTabControlDrawItem;
+            this.UpdateTimedUnlockControlsState();
 
             this._MainTabControl.SelectedTab = this._AchievementsTabPage;
             //this.statisticsList.Enabled = this.checkBox1.Checked;
@@ -154,34 +268,264 @@ namespace SAM.Game
             this.RefreshStats();
         }
 
+        private static string GetPickerPreferencesPath()
+        {
+            return Path.Combine(Application.StartupPath, "sam-picker-preferences.json");
+        }
+
+        private static string GetLegacyThemePreferencesPath()
+        {
+            return Path.Combine(Application.StartupPath, "sam-theme-preferences.json");
+        }
+
+        private static bool TryLoadLegacyThemeModePreference(out ThemeMode mode)
+        {
+            mode = ThemeMode.System;
+            string path = GetLegacyThemePreferencesPath();
+            if (File.Exists(path) == false)
+            {
+                return false;
+            }
+
+            try
+            {
+                using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                DataContractJsonSerializer serializer = new(typeof(LegacyThemePreferences));
+                if (serializer.ReadObject(stream) is not LegacyThemePreferences preferences ||
+                    Enum.TryParse(preferences.ThemeMode, true, out ThemeMode parsedMode) == false)
+                {
+                    return false;
+                }
+
+                mode = parsedMode;
+                return true;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+            catch (InvalidCastException)
+            {
+            }
+
+            return false;
+        }
+
+        private static ThemeMode LoadThemeModeFromPickerPreferences()
+        {
+            string path = GetPickerPreferencesPath();
+            if (File.Exists(path) == false)
+            {
+                return TryLoadLegacyThemeModePreference(out ThemeMode legacyMode) == true
+                    ? legacyMode
+                    : ThemeMode.System;
+            }
+
+            try
+            {
+                using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                DataContractJsonSerializer serializer = new(typeof(PickerPreferences));
+                if (serializer.ReadObject(stream) is not PickerPreferences preferences ||
+                    Enum.TryParse(preferences.ThemeMode, true, out ThemeMode mode) == false)
+                {
+                    return TryLoadLegacyThemeModePreference(out ThemeMode legacyMode) == true
+                        ? legacyMode
+                        : ThemeMode.System;
+                }
+
+                return mode;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+            catch (InvalidCastException)
+            {
+            }
+
+            return TryLoadLegacyThemeModePreference(out ThemeMode fallbackMode) == true
+                ? fallbackMode
+                : ThemeMode.System;
+        }
+
+        private static bool IsSystemDarkThemeEnabled()
+        {
+            try
+            {
+                using RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                object value = key?.GetValue("AppsUseLightTheme");
+                return value switch
+                {
+                    int intValue => intValue == 0,
+                    long longValue => longValue == 0,
+                    string textValue when int.TryParse(textValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) => parsed == 0,
+                    _ => false,
+                };
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
+
+        private void ApplyWindowDarkTitleBar()
+        {
+            if (this.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            int enabled = this._IsDarkThemeActive == true ? 1 : 0;
+            try
+            {
+                DwmSetWindowAttribute(this.Handle, 20, ref enabled, sizeof(int));
+                DwmSetWindowAttribute(this.Handle, 19, ref enabled, sizeof(int));
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+        }
+
+        private void ApplyScrollBarTheme(Control control)
+        {
+            if (control == null || control.IsHandleCreated == false)
+            {
+                return;
+            }
+
+            try
+            {
+                SetWindowTheme(control.Handle, this._IsDarkThemeActive == true ? "DarkMode_Explorer" : "Explorer", null);
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+            catch (DllNotFoundException)
+            {
+            }
+        }
+
+        private ThemeMode GetResolvedThemeMode()
+        {
+            if (this._ThemeMode == ThemeMode.System)
+            {
+                return IsSystemDarkThemeEnabled() == true
+                    ? ThemeMode.Dark
+                    : ThemeMode.Light;
+            }
+
+            return this._ThemeMode;
+        }
+
         private void ApplyModernTheme()
         {
             this.SuspendLayout();
 
-            this.BackColor = Color.FromArgb(242, 242, 247);
-            this.ForeColor = Color.FromArgb(24, 24, 28);
-            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this._IsDarkThemeActive = this.GetResolvedThemeMode() == ThemeMode.Dark;
+
+            Color windowBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(30, 32, 37) : Color.FromArgb(242, 242, 247);
+            Color foregroundColor = this._IsDarkThemeActive == true ? Color.FromArgb(232, 235, 241) : Color.FromArgb(24, 24, 28);
+            Color mutedTextColor = this._IsDarkThemeActive == true ? Color.FromArgb(168, 173, 184) : Color.FromArgb(110, 110, 116);
+            Color inputBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(46, 49, 56) : Color.White;
+            Color toolStripBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(38, 40, 46) : Color.FromArgb(252, 252, 253);
+            Color statusBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 41) : Color.FromArgb(248, 248, 250);
+            Color tabPageBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 42) : Color.FromArgb(247, 247, 250);
+            Color listBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(37, 39, 45) : Color.White;
+            Color tabSelectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(56, 60, 69) : Color.White;
+            Color tabSelectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(240, 244, 252) : Color.FromArgb(28, 34, 44);
+            Color tabUnselectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(39, 42, 49) : Color.FromArgb(239, 242, 248);
+            Color tabUnselectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(176, 182, 194) : Color.FromArgb(92, 101, 116);
+            Color tabBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(78, 83, 95) : Color.FromArgb(207, 214, 226);
+            Color listHeaderBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(49, 53, 61) : Color.FromArgb(246, 247, 251);
+            Color listHeaderForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(236, 239, 246) : Color.FromArgb(27, 31, 39);
+            Color listHeaderBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(79, 84, 96) : Color.FromArgb(218, 222, 230);
+
+            this._AchievementItemBackColor = listBackColor;
+            this._AchievementItemForeColor = foregroundColor;
+            this._ProtectedAchievementBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(78, 42, 48) : Color.FromArgb(255, 245, 246);
+            this._ProtectedAchievementForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(255, 189, 197) : Color.FromArgb(126, 24, 36);
+            this._TabSelectedBackColor = tabSelectedBackColor;
+            this._TabSelectedForeColor = tabSelectedForeColor;
+            this._TabUnselectedBackColor = tabUnselectedBackColor;
+            this._TabUnselectedForeColor = tabUnselectedForeColor;
+            this._TabBorderColor = tabBorderColor;
+
+            this.BackColor = windowBackColor;
+            this.ForeColor = foregroundColor;
             this.MinimumSize = new Size(980, 620);
             if (this.ClientSize.Width < 980 || this.ClientSize.Height < 620)
             {
                 this.ClientSize = new Size(1080, 700);
             }
 
-            this._MainToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._MainToolStrip.BackColor = toolStripBackColor;
             this._MainToolStrip.ForeColor = this.ForeColor;
+            this._MainToolStrip.Dock = DockStyle.Top;
             this._MainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
             this._MainToolStrip.Padding = new Padding(10, 6, 10, 6);
             this._MainToolStrip.AutoSize = false;
             this._MainToolStrip.Height = 44;
-            this._MainToolStrip.RenderMode = ToolStripRenderMode.System;
+            if (this._IsDarkThemeActive == true)
+            {
+                DarkToolStripColorTable stripColorTable = new(
+                    toolStripBackColor,
+                    Color.FromArgb(43, 46, 54),
+                    Color.FromArgb(68, 73, 84),
+                    Color.FromArgb(67, 95, 150),
+                    Color.FromArgb(78, 111, 173),
+                    Color.FromArgb(56, 61, 70));
+                this._DarkToolStripRenderer = new ToolStripProfessionalRenderer(
+                    stripColorTable);
+                this._DarkStatusStripRenderer = new ToolStripProfessionalRenderer(
+                    new DarkToolStripColorTable(
+                        statusBackColor,
+                        Color.FromArgb(43, 46, 54),
+                        Color.FromArgb(68, 73, 84),
+                        Color.FromArgb(67, 95, 150),
+                        Color.FromArgb(78, 111, 173),
+                        Color.FromArgb(56, 61, 70)));
+                this._MainToolStrip.Renderer = this._DarkToolStripRenderer;
+                this._MainStatusStrip.Renderer = this._DarkStatusStripRenderer;
+            }
+            else
+            {
+                this._MainToolStrip.RenderMode = ToolStripRenderMode.System;
+                this._MainStatusStrip.RenderMode = ToolStripRenderMode.System;
+            }
 
-            this._AchievementsToolStrip.BackColor = Color.FromArgb(252, 252, 253);
+            this._AchievementsToolStrip.BackColor = toolStripBackColor;
             this._AchievementsToolStrip.ForeColor = this.ForeColor;
             this._AchievementsToolStrip.GripStyle = ToolStripGripStyle.Hidden;
             this._AchievementsToolStrip.Padding = new Padding(8, 6, 8, 6);
             this._AchievementsToolStrip.AutoSize = false;
             this._AchievementsToolStrip.Height = 40;
-            this._AchievementsToolStrip.RenderMode = ToolStripRenderMode.System;
+            if (this._IsDarkThemeActive == true && this._DarkToolStripRenderer != null)
+            {
+                this._AchievementsToolStrip.Renderer = this._DarkToolStripRenderer;
+            }
+            else
+            {
+                this._AchievementsToolStrip.RenderMode = ToolStripRenderMode.System;
+            }
 
             this.StyleToolStripButton(this._StoreButton, false);
             this.StyleToolStripButton(this._ReloadButton, false);
@@ -192,22 +536,31 @@ namespace SAM.Game
             this.StyleToolStripButton(this._DisplayLockedOnlyButton, true);
             this.StyleToolStripButton(this._DisplayUnlockedOnlyButton, true);
             this.StyleToolStripButton(this._AutoSelectApplyButton, true);
+            this.StyleToolStripButton(this._TimedUnlockStartButton, true);
+            this.StyleToolStripButton(this._TimedUnlockStopButton, true);
 
-            this._DisplayLabel.ForeColor = Color.FromArgb(110, 110, 116);
-            this._MatchingStringLabel.ForeColor = Color.FromArgb(110, 110, 116);
-            this._AutoSelectLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._DisplayLabel.ForeColor = mutedTextColor;
+            this._MatchingStringLabel.ForeColor = mutedTextColor;
+            this._AutoSelectLabel.ForeColor = mutedTextColor;
+            this._TimedUnlockLabel.ForeColor = mutedTextColor;
 
             this._MatchingStringTextBox.AutoSize = false;
             this._MatchingStringTextBox.Size = new Size(180, 26);
             this._MatchingStringTextBox.BorderStyle = BorderStyle.FixedSingle;
-            this._MatchingStringTextBox.BackColor = Color.White;
+            this._MatchingStringTextBox.BackColor = inputBackColor;
             this._MatchingStringTextBox.ForeColor = this.ForeColor;
 
             this._AutoSelectCountTextBox.AutoSize = false;
             this._AutoSelectCountTextBox.Size = new Size(70, 26);
             this._AutoSelectCountTextBox.BorderStyle = BorderStyle.FixedSingle;
-            this._AutoSelectCountTextBox.BackColor = Color.White;
+            this._AutoSelectCountTextBox.BackColor = inputBackColor;
             this._AutoSelectCountTextBox.ForeColor = this.ForeColor;
+
+            this._TimedUnlockHoursTextBox.AutoSize = false;
+            this._TimedUnlockHoursTextBox.Size = new Size(70, 26);
+            this._TimedUnlockHoursTextBox.BorderStyle = BorderStyle.FixedSingle;
+            this._TimedUnlockHoursTextBox.BackColor = inputBackColor;
+            this._TimedUnlockHoursTextBox.ForeColor = this.ForeColor;
 
             foreach (ToolStripItem item in this._MainToolStrip.Items)
             {
@@ -227,40 +580,81 @@ namespace SAM.Game
 
             this._MainTabControl.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
             this._MainTabControl.Padding = new Point(18, 8);
+            this._MainTabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            this._MainTabControl.BackColor = tabPageBackColor;
+            this._MainTabControl.ForeColor = this.ForeColor;
+            this._MainTabControl.Appearance = TabAppearance.Normal;
 
-            this._AchievementsTabPage.BackColor = Color.FromArgb(247, 247, 250);
-            this._StatisticsTabPage.BackColor = Color.FromArgb(247, 247, 250);
+            this._AchievementsTabPage.BackColor = tabPageBackColor;
+            this._AchievementsTabPage.ForeColor = this.ForeColor;
+            this._AchievementsTabPage.UseVisualStyleBackColor = false;
+            this._AchievementsTabPage.Padding = Padding.Empty;
+            this._StatisticsTabPage.BackColor = tabPageBackColor;
+            this._StatisticsTabPage.ForeColor = this.ForeColor;
+            this._StatisticsTabPage.UseVisualStyleBackColor = false;
+            this._StatisticsTabPage.Padding = Padding.Empty;
 
-            this._AchievementListView.BackColor = Color.White;
+            this._AchievementsToolStrip.Dock = DockStyle.Top;
+            this._AchievementListView.Dock = DockStyle.Fill;
+            this._AchievementImageList.ColorDepth = ColorDepth.Depth32Bit;
+
+            this._AchievementListView.BackColor = listBackColor;
             this._AchievementListView.ForeColor = this.ForeColor;
             this._AchievementListView.BorderStyle = BorderStyle.None;
             this._AchievementListView.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
             this._AchievementListView.GridLines = false;
+            this._AchievementListView.UseDarkScrollBars = this._IsDarkThemeActive;
+            this._AchievementListView.UseDarkColumnHeaders = this._IsDarkThemeActive;
+            this._AchievementListView.SetColumnHeaderColors(
+                listHeaderBackColor,
+                listHeaderForeColor,
+                listHeaderBorderColor);
 
             this._MainStatusStrip.SizingGrip = false;
-            this._MainStatusStrip.BackColor = Color.FromArgb(248, 248, 250);
-            this._MainStatusStrip.ForeColor = Color.FromArgb(110, 110, 116);
-            this._CountryStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
-            this._GameStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
-            this._DownloadStatusLabel.ForeColor = Color.FromArgb(110, 110, 116);
+            this._MainStatusStrip.Dock = DockStyle.Bottom;
+            this._MainStatusStrip.BackColor = statusBackColor;
+            this._MainStatusStrip.ForeColor = mutedTextColor;
+            this._CountryStatusLabel.ForeColor = mutedTextColor;
+            this._GameStatusLabel.ForeColor = mutedTextColor;
+            this._DownloadStatusLabel.ForeColor = mutedTextColor;
 
-            this._StatisticsDataGridView.BackgroundColor = Color.White;
+            this._StatisticsDataGridView.BackgroundColor = listBackColor;
             this._StatisticsDataGridView.BorderStyle = BorderStyle.None;
-            this._StatisticsDataGridView.GridColor = Color.FromArgb(232, 234, 239);
+            this._StatisticsDataGridView.GridColor = this._IsDarkThemeActive == true ? Color.FromArgb(76, 80, 90) : Color.FromArgb(232, 234, 239);
             this._StatisticsDataGridView.EnableHeadersVisualStyles = false;
             this._StatisticsDataGridView.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(246, 247, 251);
+            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(52, 55, 63) : Color.FromArgb(246, 247, 251);
             this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.ForeColor = this.ForeColor;
-            this._StatisticsDataGridView.DefaultCellStyle.BackColor = Color.White;
+            this._StatisticsDataGridView.DefaultCellStyle.BackColor = listBackColor;
             this._StatisticsDataGridView.DefaultCellStyle.ForeColor = this.ForeColor;
-            this._StatisticsDataGridView.DefaultCellStyle.SelectionBackColor = Color.FromArgb(223, 231, 246);
+            this._StatisticsDataGridView.DefaultCellStyle.SelectionBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(71, 104, 168) : Color.FromArgb(223, 231, 246);
             this._StatisticsDataGridView.DefaultCellStyle.SelectionForeColor = this.ForeColor;
-            this._StatisticsDataGridView.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 251, 255);
+            this._StatisticsDataGridView.AlternatingRowsDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(42, 45, 52) : Color.FromArgb(250, 251, 255);
             this._StatisticsDataGridView.RowHeadersVisible = false;
 
-            this._EnableStatsEditingCheckBox.ForeColor = Color.FromArgb(90, 90, 98);
+            this._EnableStatsEditingCheckBox.ForeColor = mutedTextColor;
 
+            this.LayoutMainContent();
+            this.ApplyWindowDarkTitleBar();
+            this.ApplyScrollBarTheme(this._StatisticsDataGridView);
+            this.ApplyAchievementListTheme();
+            this._MainTabControl.Invalidate();
+            this.UpdateTimedUnlockControlsState();
             this.ResumeLayout(true);
+        }
+
+        private void LayoutMainContent()
+        {
+            if (this._MainTabControl == null || this._MainToolStrip == null || this._MainStatusStrip == null)
+            {
+                return;
+            }
+
+            const int margin = 8;
+            int top = this._MainToolStrip.Bottom + margin;
+            int width = Math.Max(1, this.ClientSize.Width - (margin * 2));
+            int height = Math.Max(1, this.ClientSize.Height - top - this._MainStatusStrip.Height - margin);
+            this._MainTabControl.SetBounds(margin, top, width, height);
         }
 
         private void StyleToolStripButton(ToolStripButton button, bool textOnly)
@@ -282,6 +676,620 @@ namespace SAM.Game
             }
 
             button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+        }
+
+        private void ApplyAchievementListTheme()
+        {
+            foreach (ListViewItem item in this._AchievementListView.Items)
+            {
+                if (item.Tag is not Stats.AchievementInfo info)
+                {
+                    continue;
+                }
+
+                bool isProtected = (info.Permission & 3) != 0;
+                item.BackColor = isProtected == true ? this._ProtectedAchievementBackColor : this._AchievementItemBackColor;
+                item.ForeColor = isProtected == true ? this._ProtectedAchievementForeColor : this._AchievementItemForeColor;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            this.ApplyWindowDarkTitleBar();
+            this.ApplyScrollBarTheme(this._StatisticsDataGridView);
+            this._AchievementListView.UseDarkScrollBars = this._IsDarkThemeActive;
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+
+            ThemeMode themeMode = LoadThemeModeFromPickerPreferences();
+            if (themeMode == this._ThemeMode)
+            {
+                return;
+            }
+
+            this._ThemeMode = themeMode;
+            this.ApplyModernTheme();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            this.StopTimedUnlock("Timed unlock stopped because window is closing.", false);
+            base.OnFormClosing(e);
+        }
+
+        private void OnMainTabControlDrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (sender is not TabControl tabControl ||
+                e.Index < 0 ||
+                e.Index >= tabControl.TabPages.Count)
+            {
+                return;
+            }
+
+            Rectangle headerBounds = new(
+                0,
+                0,
+                tabControl.Width,
+                Math.Max(tabControl.DisplayRectangle.Top + 1, 1));
+            using (SolidBrush headerBrush = new(this._TabUnselectedBackColor))
+            using (Pen headerBorderPen = new(this._TabBorderColor))
+            {
+                e.Graphics.FillRectangle(headerBrush, headerBounds);
+                int lineY = Math.Max(0, headerBounds.Bottom - 1);
+                e.Graphics.DrawLine(headerBorderPen, 0, lineY, Math.Max(0, tabControl.Width - 1), lineY);
+            }
+
+            Rectangle bounds = tabControl.GetTabRect(e.Index);
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+            Color backColor = selected == true ? this._TabSelectedBackColor : this._TabUnselectedBackColor;
+            Color foreColor = selected == true ? this._TabSelectedForeColor : this._TabUnselectedForeColor;
+
+            using SolidBrush backBrush = new(backColor);
+            using Pen borderPen = new(this._TabBorderColor);
+            e.Graphics.FillRectangle(backBrush, bounds);
+
+            Rectangle borderRect = new(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+            e.Graphics.DrawRectangle(borderPen, borderRect);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                tabControl.TabPages[e.Index].Text,
+                tabControl.Font,
+                bounds,
+                foreColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+
+        private void UpdateTimedUnlockControlsState()
+        {
+            bool running = this._TimedUnlockRunning == true;
+            this._TimedUnlockStartButton.Enabled = running == false;
+            this._TimedUnlockStopButton.Enabled = running == true;
+            this._TimedUnlockHoursTextBox.Enabled = running == false;
+        }
+
+        private void OnTimedUnlockHoursKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            this.StartTimedUnlock();
+        }
+
+        private void OnStartTimedUnlock(object sender, EventArgs e)
+        {
+            this.StartTimedUnlock();
+        }
+
+        private void OnStopTimedUnlock(object sender, EventArgs e)
+        {
+            this.StopTimedUnlock("Timed unlock was stopped by user.", true);
+        }
+
+        private void StartTimedUnlock()
+        {
+            if (this._TimedUnlockRunning == true)
+            {
+                return;
+            }
+
+            if (TryParseTimedUnlockDuration(this._TimedUnlockHoursTextBox.Text, out TimeSpan targetDuration, out string parseError) == false)
+            {
+                MessageBox.Show(
+                    this,
+                    parseError ?? "Enter a valid duration.",
+                    "Invalid Duration",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                this._TimedUnlockHoursTextBox.Focus();
+                this._TimedUnlockHoursTextBox.SelectAll();
+                return;
+            }
+
+            this.EnsureUnfilteredAchievementViewForTimedUnlock();
+
+            List<string> candidateIds = this._AchievementListView.Items
+                .OfType<ListViewItem>()
+                .Where(item => item.Tag is Stats.AchievementInfo info &&
+                               item.Checked == false &&
+                               (info.Permission & 3) == 0)
+                .Select(item => ((Stats.AchievementInfo)item.Tag).Id)
+                .Where(id => string.IsNullOrWhiteSpace(id) == false)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (candidateIds.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No unlockable locked achievements are available.",
+                    "Information",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            List<TimeSpan> intervals = this.BuildTimedUnlockIntervals(candidateIds.Count, targetDuration);
+            if (intervals.Count != candidateIds.Count)
+            {
+                MessageBox.Show(
+                    this,
+                    "Could not build a valid timed unlock plan.",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            this.ShuffleInPlace(candidateIds);
+
+            this._TimedUnlockPendingAchievementIds.Clear();
+            this._TimedUnlockPendingAchievementIds.AddRange(candidateIds);
+            this._TimedUnlockIntervals.Clear();
+            this._TimedUnlockIntervals.AddRange(intervals);
+
+            this._TimedUnlockTargetDuration = targetDuration;
+            this._TimedUnlockStartedUtc = DateTime.UtcNow;
+            this._TimedUnlockCompleted = 0;
+            this._TimedUnlockTotalPlanned = candidateIds.Count;
+            this._TimedUnlockRunning = true;
+            this._TimedUnlockBusy = false;
+            this._TimedUnlockLastCountdownUpdateUtc = DateTime.MinValue;
+            this._TimedUnlockNextUnlockUtc = this._TimedUnlockStartedUtc + this._TimedUnlockIntervals[0];
+
+            this.UpdateTimedUnlockControlsState();
+
+            this._GameStatusLabel.Text =
+                $"Timed unlock started: {this._TimedUnlockTotalPlanned} achievements over {FormatDuration(targetDuration)}. " +
+                $"First unlock in {FormatDuration(this._TimedUnlockIntervals[0])}.";
+        }
+
+        private void EnsureUnfilteredAchievementViewForTimedUnlock()
+        {
+            bool reloadNeeded = false;
+            if (this._DisplayLockedOnlyButton.Checked == true || this._DisplayUnlockedOnlyButton.Checked == true)
+            {
+                this._DisplayLockedOnlyButton.Checked = false;
+                this._DisplayUnlockedOnlyButton.Checked = false;
+                reloadNeeded = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(this._MatchingStringTextBox.Text) == false)
+            {
+                this._MatchingStringTextBox.Text = "";
+                reloadNeeded = true;
+            }
+
+            if (reloadNeeded == true || this._AchievementListView.Items.Count == 0)
+            {
+                this.GetAchievements();
+            }
+        }
+
+        private static bool TryParseTimedUnlockDuration(
+            string input,
+            out TimeSpan duration,
+            out string error)
+        {
+            duration = TimeSpan.Zero;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(input) == true)
+            {
+                error = "Enter duration, for example: 72 (hours), 24h, 90m, or 2d.";
+                return false;
+            }
+
+            string raw = input.Trim();
+            string numericText = raw;
+            double multiplier = 1.0; // hours by default
+
+            char last = raw[raw.Length - 1];
+            if (char.IsLetter(last) == true)
+            {
+                numericText = raw.Substring(0, raw.Length - 1).Trim();
+                multiplier = char.ToLowerInvariant(last) switch
+                {
+                    'h' => 1.0,
+                    'm' => 1.0 / 60.0,
+                    'd' => 24.0,
+                    _ => -1.0,
+                };
+                if (multiplier < 0)
+                {
+                    error = "Supported duration units are: h (hours), m (minutes), d (days).";
+                    return false;
+                }
+            }
+
+            if (double.TryParse(numericText, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) == false &&
+                double.TryParse(numericText, NumberStyles.Float, CultureInfo.CurrentCulture, out value) == false)
+            {
+                error = "Duration format is invalid.";
+                return false;
+            }
+
+            if (double.IsNaN(value) == true || double.IsInfinity(value) == true || value <= 0.0)
+            {
+                error = "Duration must be a positive number.";
+                return false;
+            }
+
+            double totalHours = value * multiplier;
+            if (totalHours <= 0.0)
+            {
+                error = "Duration is too small.";
+                return false;
+            }
+
+            if (totalHours > 24.0 * 365.0)
+            {
+                error = "Duration is too large.";
+                return false;
+            }
+
+            duration = TimeSpan.FromHours(totalHours);
+            if (duration.TotalSeconds < 5.0)
+            {
+                error = "Duration must be at least 5 seconds.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private List<TimeSpan> BuildTimedUnlockIntervals(int unlockCount, TimeSpan totalDuration)
+        {
+            if (unlockCount <= 0)
+            {
+                return new List<TimeSpan>();
+            }
+
+            long totalTicks = Math.Max(1L, totalDuration.Ticks);
+            long absoluteMinTicks = TimeSpan.FromSeconds(5).Ticks;
+            long preferredMinTicks = TimeSpan.FromMinutes(5).Ticks;
+            long preferredMaxTicks = TimeSpan.FromMinutes(40).Ticks;
+
+            double averageTicks = totalTicks / (double)unlockCount;
+
+            long minTicks;
+            long maxTicks;
+            if (averageTicks >= preferredMinTicks && averageTicks <= preferredMaxTicks)
+            {
+                minTicks = preferredMinTicks;
+                maxTicks = preferredMaxTicks;
+            }
+            else if (averageTicks < preferredMinTicks)
+            {
+                minTicks = Math.Max(absoluteMinTicks, (long)Math.Floor(averageTicks * 0.35));
+                maxTicks = Math.Max(minTicks + TimeSpan.FromSeconds(3).Ticks, (long)Math.Ceiling(averageTicks * 1.85));
+            }
+            else
+            {
+                minTicks = Math.Max(preferredMinTicks, (long)Math.Floor(averageTicks * 0.45));
+                maxTicks = Math.Max(minTicks + TimeSpan.FromSeconds(10).Ticks, (long)Math.Ceiling(averageTicks * 1.75));
+            }
+
+            long averageFloor = Math.Max(absoluteMinTicks, (long)Math.Floor(averageTicks));
+            if (minTicks > averageFloor)
+            {
+                minTicks = averageFloor;
+            }
+
+            long minFeasible = Math.Max(absoluteMinTicks, totalTicks / unlockCount);
+            if (minTicks * unlockCount > totalTicks)
+            {
+                minTicks = minFeasible;
+            }
+
+            if (maxTicks * unlockCount < totalTicks)
+            {
+                maxTicks = (long)Math.Ceiling(totalTicks / (double)unlockCount);
+            }
+
+            if (maxTicks < minTicks)
+            {
+                maxTicks = minTicks;
+            }
+
+            List<TimeSpan> intervals = new(unlockCount);
+            long remainingTicks = totalTicks;
+            for (int index = 0; index < unlockCount; index++)
+            {
+                int remainingUnlocks = unlockCount - index;
+                long minAllowedForCurrent = Math.Max(
+                    minTicks,
+                    remainingTicks - ((long)(remainingUnlocks - 1) * maxTicks));
+                long maxAllowedForCurrent = Math.Min(
+                    maxTicks,
+                    remainingTicks - ((long)(remainingUnlocks - 1) * minTicks));
+
+                if (minAllowedForCurrent > maxAllowedForCurrent)
+                {
+                    long forced = Math.Max(1L, remainingTicks / remainingUnlocks);
+                    minAllowedForCurrent = forced;
+                    maxAllowedForCurrent = forced;
+                }
+
+                long currentTicks = index == unlockCount - 1
+                    ? remainingTicks
+                    : this.GetRandomTickInRange(minAllowedForCurrent, maxAllowedForCurrent);
+
+                currentTicks = Math.Max(1L, currentTicks);
+                intervals.Add(TimeSpan.FromTicks(currentTicks));
+                remainingTicks -= currentTicks;
+            }
+
+            if (remainingTicks != 0 && intervals.Count > 0)
+            {
+                int lastIndex = intervals.Count - 1;
+                long adjusted = Math.Max(1L, intervals[lastIndex].Ticks + remainingTicks);
+                intervals[lastIndex] = TimeSpan.FromTicks(adjusted);
+            }
+
+            return intervals;
+        }
+
+        private long GetRandomTickInRange(long minInclusive, long maxInclusive)
+        {
+            if (maxInclusive <= minInclusive)
+            {
+                return minInclusive;
+            }
+
+            double bell = (this._TimedUnlockRandom.NextDouble() + this._TimedUnlockRandom.NextDouble()) * 0.5;
+            long span = maxInclusive - minInclusive;
+            long offset = (long)Math.Round(span * bell, MidpointRounding.AwayFromZero);
+            long value = minInclusive + offset;
+            if (value < minInclusive)
+            {
+                return minInclusive;
+            }
+
+            return value > maxInclusive ? maxInclusive : value;
+        }
+
+        private void ShuffleInPlace(IList<string> ids)
+        {
+            for (int i = ids.Count - 1; i > 0; i--)
+            {
+                int swapIndex = this._TimedUnlockRandom.Next(i + 1);
+                (ids[i], ids[swapIndex]) = (ids[swapIndex], ids[i]);
+            }
+        }
+
+        private void StopTimedUnlock(string reason, bool userInitiated)
+        {
+            if (this._TimedUnlockRunning == false)
+            {
+                return;
+            }
+
+            this._TimedUnlockRunning = false;
+            this._TimedUnlockBusy = false;
+            this._TimedUnlockPendingAchievementIds.Clear();
+            this._TimedUnlockIntervals.Clear();
+
+            this.UpdateTimedUnlockControlsState();
+
+            if (string.IsNullOrWhiteSpace(reason) == false)
+            {
+                this._GameStatusLabel.Text = reason;
+                if (userInitiated == true)
+                {
+                    MessageBox.Show(
+                        this,
+                        reason,
+                        "Timed Unlock",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+            }
+        }
+
+        private void ProcessTimedUnlockTick()
+        {
+            if (this._TimedUnlockRunning == false || this._TimedUnlockBusy == true)
+            {
+                return;
+            }
+
+            DateTime utcNow = DateTime.UtcNow;
+            if (utcNow < this._TimedUnlockNextUnlockUtc)
+            {
+                if (utcNow - this._TimedUnlockLastCountdownUpdateUtc >= TimeSpan.FromSeconds(1))
+                {
+                    TimeSpan left = this._TimedUnlockNextUnlockUtc - utcNow;
+                    this._GameStatusLabel.Text =
+                        $"Timed unlock running: {this._TimedUnlockCompleted}/{this._TimedUnlockTotalPlanned}. " +
+                        $"Next unlock in {FormatDuration(left)}.";
+                    this._TimedUnlockLastCountdownUpdateUtc = utcNow;
+                }
+
+                return;
+            }
+
+            this._TimedUnlockBusy = true;
+            try
+            {
+                if (this._TimedUnlockPendingAchievementIds.Count == 0)
+                {
+                    this.StopTimedUnlock(
+                        $"Timed unlock completed: {this._TimedUnlockCompleted}/{this._TimedUnlockTotalPlanned}.",
+                        false);
+                    this.RefreshStats();
+                    return;
+                }
+
+                string id = this._TimedUnlockPendingAchievementIds[0];
+                this._TimedUnlockPendingAchievementIds.RemoveAt(0);
+
+                if (this.TryUnlockAchievementNow(id, out string displayName, out string error) == false)
+                {
+                    this.StopTimedUnlock(
+                        $"Timed unlock stopped. Failed on {id}: {error}",
+                        true);
+                    return;
+                }
+
+                this._TimedUnlockCompleted++;
+                this.UpdateAchievementVisualAfterTimedUnlock(id);
+                this.SaveAchievementStatusDatabaseEntry();
+
+                if (this._TimedUnlockCompleted >= this._TimedUnlockTotalPlanned ||
+                    this._TimedUnlockPendingAchievementIds.Count == 0)
+                {
+                    TimeSpan elapsed = DateTime.UtcNow - this._TimedUnlockStartedUtc;
+                    this.StopTimedUnlock(
+                        $"Timed unlock completed: {this._TimedUnlockCompleted}/{this._TimedUnlockTotalPlanned} in {FormatDuration(elapsed)} " +
+                        $"(target {FormatDuration(this._TimedUnlockTargetDuration)}).",
+                        false);
+                    this.RefreshStats();
+                    return;
+                }
+
+                TimeSpan nextDelay = this._TimedUnlockIntervals[this._TimedUnlockCompleted];
+                this._TimedUnlockNextUnlockUtc = DateTime.UtcNow + nextDelay;
+                this._TimedUnlockLastCountdownUpdateUtc = DateTime.MinValue;
+                this._GameStatusLabel.Text =
+                    $"Unlocked: {displayName}. Progress {this._TimedUnlockCompleted}/{this._TimedUnlockTotalPlanned}. " +
+                    $"Next in {FormatDuration(nextDelay)}.";
+            }
+            finally
+            {
+                this._TimedUnlockBusy = false;
+            }
+        }
+
+        private bool TryUnlockAchievementNow(string achievementId, out string displayName, out string error)
+        {
+            displayName = achievementId;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(achievementId) == true)
+            {
+                error = "invalid achievement id";
+                return false;
+            }
+
+            ListViewItem item = this._AchievementListView.Items
+                .OfType<ListViewItem>()
+                .FirstOrDefault(candidate =>
+                    candidate.Tag is Stats.AchievementInfo info &&
+                    string.Equals(info.Id, achievementId, StringComparison.Ordinal));
+            if (item?.Tag is Stats.AchievementInfo infoFromItem)
+            {
+                displayName = string.IsNullOrWhiteSpace(infoFromItem.Name) == false
+                    ? infoFromItem.Name
+                    : achievementId;
+            }
+
+            if (this._SteamClient.SteamUserStats.GetAchievement(achievementId, out bool isAlreadyUnlocked) == true &&
+                isAlreadyUnlocked == true)
+            {
+                return true;
+            }
+
+            if (this._SteamClient.SteamUserStats.SetAchievement(achievementId, true) == false)
+            {
+                error = "SetAchievement failed";
+                return false;
+            }
+
+            if (this._SteamClient.SteamUserStats.StoreStats() == false)
+            {
+                error = "StoreStats failed";
+                return false;
+            }
+
+            return true;
+        }
+
+        private void UpdateAchievementVisualAfterTimedUnlock(string achievementId)
+        {
+            foreach (ListViewItem item in this._AchievementListView.Items)
+            {
+                if (item.Tag is not Stats.AchievementInfo info ||
+                    string.Equals(info.Id, achievementId, StringComparison.Ordinal) == false)
+                {
+                    continue;
+                }
+
+                this._IsUpdatingAchievementList = true;
+                try
+                {
+                    item.Checked = true;
+                    info.IsAchieved = true;
+                    info.UnlockTime = DateTime.Now;
+                    if (item.SubItems.Count > 2)
+                    {
+                        item.SubItems[2].Text = info.UnlockTime.Value.ToString();
+                    }
+
+                    this.AddAchievementToIconQueue(info, true);
+                }
+                finally
+                {
+                    this._IsUpdatingAchievementList = false;
+                }
+
+                this._AchievementListView.Invalidate(item.Bounds);
+                return;
+            }
+        }
+
+        private static string FormatDuration(TimeSpan duration)
+        {
+            if (duration < TimeSpan.Zero)
+            {
+                duration = TimeSpan.Zero;
+            }
+
+            if (duration.TotalDays >= 1.0)
+            {
+                return $"{(int)duration.TotalDays}d {duration.Hours}h {duration.Minutes}m";
+            }
+
+            if (duration.TotalHours >= 1.0)
+            {
+                return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+            }
+
+            if (duration.TotalMinutes >= 1.0)
+            {
+                return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+            }
+
+            return $"{Math.Max(0, duration.Seconds)}s";
         }
 
         private static string GetAchievementIconKey(Stats.AchievementInfo info)
@@ -722,6 +1730,7 @@ namespace SAM.Game
             }
 
             this._GameStatusLabel.Text = $"Retrieved {this._AchievementListView.Items.Count} achievements and {this._StatisticsDataGridView.Rows.Count} statistics.";
+            this.SaveAchievementStatusDatabaseEntry();
             this.EnableInput();
         }
 
@@ -826,11 +1835,11 @@ namespace SAM.Game
                         Tag = info,
                         Text = info.Name,
                         BackColor = isProtected == true
-                            ? Color.FromArgb(255, 245, 246)
-                            : Color.White,
+                            ? this._ProtectedAchievementBackColor
+                            : this._AchievementItemBackColor,
                         ForeColor = isProtected == true
-                            ? Color.FromArgb(126, 24, 36)
-                            : Color.FromArgb(28, 28, 33),
+                            ? this._ProtectedAchievementForeColor
+                            : this._AchievementItemForeColor,
                     };
 
                     info.Item = item;
@@ -1093,11 +2102,13 @@ namespace SAM.Game
         {
             this._CallbackTimer.Enabled = false;
             this._SteamClient.RunCallbacks(false);
+            this.ProcessTimedUnlockTick();
             this._CallbackTimer.Enabled = true;
         }
 
         private void OnRefresh(object sender, EventArgs e)
         {
+            this.StopTimedUnlock("Timed unlock stopped because stats were refreshed.", false);
             this.RefreshStats();
         }
 
@@ -1296,6 +2307,33 @@ namespace SAM.Game
             }
         }
 
+        private bool? GetCurrentAchievementUnlockBlockedStatus()
+        {
+            int total = 0;
+            int protectedCount = 0;
+
+            foreach (Stats.AchievementDefinition definition in this._AchievementDefinitions)
+            {
+                if (definition == null || string.IsNullOrWhiteSpace(definition.Id) == true)
+                {
+                    continue;
+                }
+
+                total++;
+                if ((definition.Permission & 3) != 0)
+                {
+                    protectedCount++;
+                }
+            }
+
+            if (total <= 0)
+            {
+                return null;
+            }
+
+            return protectedCount >= total;
+        }
+
         private void SaveAchievementStatusDatabaseEntry()
         {
             if (this._GameId <= 0 || this._GameId > uint.MaxValue)
@@ -1307,6 +2345,8 @@ namespace SAM.Game
             {
                 return;
             }
+
+            bool? unlockBlocked = this.GetCurrentAchievementUnlockBlockedStatus();
 
             uint appId = (uint)this._GameId;
             string gameName = this._SteamClient.SteamApps001.GetAppData(appId, "name");
@@ -1361,8 +2401,12 @@ namespace SAM.Game
                 entry.Type = string.IsNullOrWhiteSpace(entry.Type) == false ? entry.Type : "normal";
                 entry.AchievementUnlocked = unlocked;
                 entry.AchievementTotal = total;
-                entry.HasProgress = true;
-                entry.HasIncompleteAchievements = total > 0 && unlocked < total;
+                entry.HasProgress = unlocked >= 0 && total >= 0;
+                entry.HasIncompleteAchievements = entry.HasProgress == true && total > 0 && unlocked < total;
+                if (unlockBlocked.HasValue == true)
+                {
+                    entry.AchievementUnlockBlocked = unlockBlocked.Value;
+                }
 
                 if (index >= 0)
                 {
@@ -1466,6 +2510,8 @@ namespace SAM.Game
 
         private void OnResetAllStats(object sender, EventArgs e)
         {
+            this.StopTimedUnlock("Timed unlock stopped because reset was requested.", false);
+
             if (MessageBox.Show(
                 "Are you absolutely sure you want to reset stats?",
                 "Warning",
@@ -1568,6 +2614,7 @@ namespace SAM.Game
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
+            this.LayoutMainContent();
             this.ResizeAchievementColumns();
         }
 

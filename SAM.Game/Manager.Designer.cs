@@ -32,6 +32,7 @@
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator1;
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator2;
             System.Windows.Forms.ToolStripSeparator _ToolStripSeparator3;
+            System.Windows.Forms.ToolStripSeparator _ToolStripSeparator4;
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Manager));
             this._MainToolStrip = new System.Windows.Forms.ToolStrip();
             this._StoreButton = new System.Windows.Forms.ToolStripButton();
@@ -61,12 +62,17 @@
             this._AutoSelectLabel = new System.Windows.Forms.ToolStripLabel();
             this._AutoSelectCountTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._AutoSelectApplyButton = new System.Windows.Forms.ToolStripButton();
+            this._TimedUnlockLabel = new System.Windows.Forms.ToolStripLabel();
+            this._TimedUnlockHoursTextBox = new System.Windows.Forms.ToolStripTextBox();
+            this._TimedUnlockStartButton = new System.Windows.Forms.ToolStripButton();
+            this._TimedUnlockStopButton = new System.Windows.Forms.ToolStripButton();
             this._StatisticsTabPage = new System.Windows.Forms.TabPage();
             this._EnableStatsEditingCheckBox = new System.Windows.Forms.CheckBox();
             this._StatisticsDataGridView = new System.Windows.Forms.DataGridView();
             _ToolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             _ToolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
             _ToolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
+            _ToolStripSeparator4 = new System.Windows.Forms.ToolStripSeparator();
             this._MainToolStrip.SuspendLayout();
             this._MainStatusStrip.SuspendLayout();
             this._MainTabControl.SuspendLayout();
@@ -90,6 +96,11 @@
             // 
             _ToolStripSeparator3.Name = "_ToolStripSeparator3";
             _ToolStripSeparator3.Size = new System.Drawing.Size(6, 25);
+            // 
+            // _ToolStripSeparator4
+            // 
+            _ToolStripSeparator4.Name = "_ToolStripSeparator4";
+            _ToolStripSeparator4.Size = new System.Drawing.Size(6, 25);
             // 
             // _MainToolStrip
             // 
@@ -253,6 +264,11 @@
             this._AutoSelectLabel,
             this._AutoSelectCountTextBox,
             this._AutoSelectApplyButton,
+            _ToolStripSeparator4,
+            this._TimedUnlockLabel,
+            this._TimedUnlockHoursTextBox,
+            this._TimedUnlockStartButton,
+            this._TimedUnlockStopButton,
             _ToolStripSeparator3,
             this._DisplayLabel,
             this._DisplayLockedOnlyButton,
@@ -364,6 +380,42 @@
             this._AutoSelectApplyButton.ToolTipText = "Select the requested amount from currently visible locked achievements";
             this._AutoSelectApplyButton.Click += new System.EventHandler(this.OnAutoSelectCountApply);
             // 
+            // _TimedUnlockLabel
+            // 
+            this._TimedUnlockLabel.Name = "_TimedUnlockLabel";
+            this._TimedUnlockLabel.Size = new System.Drawing.Size(80, 22);
+            this._TimedUnlockLabel.Text = "Complete in h";
+            // 
+            // _TimedUnlockHoursTextBox
+            // 
+            this._TimedUnlockHoursTextBox.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this._TimedUnlockHoursTextBox.Name = "_TimedUnlockHoursTextBox";
+            this._TimedUnlockHoursTextBox.Size = new System.Drawing.Size(60, 25);
+            this._TimedUnlockHoursTextBox.Text = "72";
+            this._TimedUnlockHoursTextBox.ToolTipText = "Target duration in hours (e.g. 72)";
+            this._TimedUnlockHoursTextBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.OnTimedUnlockHoursKeyDown);
+            // 
+            // _TimedUnlockStartButton
+            // 
+            this._TimedUnlockStartButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._TimedUnlockStartButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._TimedUnlockStartButton.Name = "_TimedUnlockStartButton";
+            this._TimedUnlockStartButton.Size = new System.Drawing.Size(34, 22);
+            this._TimedUnlockStartButton.Text = "Start";
+            this._TimedUnlockStartButton.ToolTipText = "Start randomized timed unlock";
+            this._TimedUnlockStartButton.Click += new System.EventHandler(this.OnStartTimedUnlock);
+            // 
+            // _TimedUnlockStopButton
+            // 
+            this._TimedUnlockStopButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._TimedUnlockStopButton.Enabled = false;
+            this._TimedUnlockStopButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._TimedUnlockStopButton.Name = "_TimedUnlockStopButton";
+            this._TimedUnlockStopButton.Size = new System.Drawing.Size(35, 22);
+            this._TimedUnlockStopButton.Text = "Stop";
+            this._TimedUnlockStopButton.ToolTipText = "Stop randomized timed unlock";
+            this._TimedUnlockStopButton.Click += new System.EventHandler(this.OnStopTimedUnlock);
+            // 
             // _StatisticsTabPage
             // 
             this._StatisticsTabPage.Controls.Add(this._EnableStatsEditingCheckBox);
@@ -465,6 +517,10 @@
         private System.Windows.Forms.ToolStripLabel _AutoSelectLabel;
         private System.Windows.Forms.ToolStripTextBox _AutoSelectCountTextBox;
         private System.Windows.Forms.ToolStripButton _AutoSelectApplyButton;
+        private System.Windows.Forms.ToolStripLabel _TimedUnlockLabel;
+        private System.Windows.Forms.ToolStripTextBox _TimedUnlockHoursTextBox;
+        private System.Windows.Forms.ToolStripButton _TimedUnlockStartButton;
+        private System.Windows.Forms.ToolStripButton _TimedUnlockStopButton;
         private System.Windows.Forms.ColumnHeader _AchievementUnlockTimeColumnHeader;
         private System.Windows.Forms.CheckBox _EnableStatsEditingCheckBox;
     }

@@ -26,6 +26,8 @@ using System.Globalization;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Threading;
 using System.Windows.Forms;
 using APITypes = SAM.API.Types;
@@ -158,6 +160,50 @@ namespace SAM.Game
             public int Total { get; set; }
         }
 
+        [DataContract]
+        private sealed class AchievementStatusDatabase
+        {
+            [DataMember(Name = "generated_utc")]
+            public string GeneratedUtc { get; set; }
+
+            [DataMember(Name = "steam_id")]
+            public ulong SteamId { get; set; }
+
+            [DataMember(Name = "scan_mode")]
+            public string ScanMode { get; set; }
+
+            [DataMember(Name = "games")]
+            public AchievementStatusEntry[] Games { get; set; }
+        }
+
+        [DataContract]
+        private sealed class AchievementStatusEntry
+        {
+            [DataMember(Name = "app_id")]
+            public uint AppId { get; set; }
+
+            [DataMember(Name = "name")]
+            public string Name { get; set; }
+
+            [DataMember(Name = "type")]
+            public string Type { get; set; }
+
+            [DataMember(Name = "achievement_unlocked")]
+            public int AchievementUnlocked { get; set; }
+
+            [DataMember(Name = "achievement_total")]
+            public int AchievementTotal { get; set; }
+
+            [DataMember(Name = "has_progress")]
+            public bool HasProgress { get; set; }
+
+            [DataMember(Name = "has_incomplete_achievements")]
+            public bool HasIncompleteAchievements { get; set; }
+
+            [DataMember(Name = "achievement_unlock_blocked")]
+            public bool AchievementUnlockBlocked { get; set; }
+        }
+
         private static void RunUnlockAllMode(string appIdArgument)
         {
             if (long.TryParse(appIdArgument, NumberStyles.Integer, CultureInfo.InvariantCulture, out var appId) == false)
@@ -176,6 +222,134 @@ namespace SAM.Game
 
             Console.WriteLine(
                 $"OK {result.Changed} {result.SkippedProtected} {result.Unlocked} {result.Total}");
+        }
+
+        private static string GetAchievementStatusDatabasePath()
+        {
+            return Path.Combine(Application.StartupPath, "data", "games", "achievements", "status.json");
+        }
+
+        private static bool TryReadAchievementStatusDatabase(string path, out AchievementStatusDatabase database)
+        {
+            database = null;
+            if (string.IsNullOrWhiteSpace(path) == true || File.Exists(path) == false)
+            {
+                return false;
+            }
+
+            try
+            {
+                using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                database = serializer.ReadObject(stream) as AchievementStatusDatabase;
+                return database != null;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
+            catch (InvalidCastException)
+            {
+            }
+
+            return false;
+        }
+
+        private static void TryUpdateAchievementStatusDatabase(
+            API.Client client,
+            long appId,
+            int unlocked,
+            int total,
+            bool? achievementUnlockBlocked = null)
+        {
+            if (client == null ||
+                appId <= 0 ||
+                appId > uint.MaxValue ||
+                unlocked < 0 ||
+                total < 0)
+            {
+                return;
+            }
+
+            uint appId32 = (uint)appId;
+            ulong steamId = client.SteamUser.GetSteamId();
+
+            try
+            {
+                string path = GetAchievementStatusDatabasePath();
+                string directory = Path.GetDirectoryName(path);
+                if (string.IsNullOrEmpty(directory) == false)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                AchievementStatusDatabase database = new();
+                if (TryReadAchievementStatusDatabase(path, out AchievementStatusDatabase existing) == true &&
+                    existing != null &&
+                    (existing.SteamId == 0 || existing.SteamId == steamId))
+                {
+                    database = existing;
+                }
+
+                List<AchievementStatusEntry> games = database.Games?
+                    .Where(item => item != null)
+                    .ToList() ?? new List<AchievementStatusEntry>();
+
+                int index = games.FindIndex(item => item.AppId == appId32);
+                AchievementStatusEntry entry = index >= 0 ? games[index] : new AchievementStatusEntry();
+
+                string name = client.SteamApps001.GetAppData(appId32, "name");
+                entry.AppId = appId32;
+                entry.Name = string.IsNullOrWhiteSpace(name) == false
+                    ? name
+                    : string.IsNullOrWhiteSpace(entry.Name) == false
+                        ? entry.Name
+                        : "App " + appId32.ToString(CultureInfo.InvariantCulture);
+                entry.Type = string.IsNullOrWhiteSpace(entry.Type) == false ? entry.Type : "normal";
+                entry.AchievementUnlocked = unlocked > total ? total : unlocked;
+                entry.AchievementTotal = total;
+                entry.HasProgress = true;
+                entry.HasIncompleteAchievements = total > 0 && entry.AchievementUnlocked < total;
+                if (achievementUnlockBlocked.HasValue == true)
+                {
+                    entry.AchievementUnlockBlocked = achievementUnlockBlocked.Value;
+                }
+
+                if (index >= 0)
+                {
+                    games[index] = entry;
+                }
+                else
+                {
+                    games.Add(entry);
+                }
+
+                database.GeneratedUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+                database.SteamId = steamId;
+                database.ScanMode = "sam-game-cli";
+                database.Games = games
+                    .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(item => item.AppId)
+                    .ToArray();
+
+                using FileStream output = new(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+                DataContractJsonSerializer serializer = new(typeof(AchievementStatusDatabase));
+                serializer.WriteObject(output, database);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (SerializationException)
+            {
+            }
         }
 
         private static bool TryUnlockAllAchievements(
@@ -214,6 +388,7 @@ namespace SAM.Game
                 {
                     result.Unlocked = unlocked;
                     result.Total = total;
+                    TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                     return true;
                 }
 
@@ -227,6 +402,7 @@ namespace SAM.Game
                 {
                     result.Unlocked = unlocked;
                     result.Total = total;
+                    TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                     return true;
                 }
 
@@ -239,6 +415,7 @@ namespace SAM.Game
             {
                 result.Unlocked = 0;
                 result.Total = 0;
+                TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                 return true;
             }
 
@@ -249,6 +426,8 @@ namespace SAM.Game
             }
 
             bool hasChanges = false;
+            int totalAchievements = 0;
+            int protectedAchievements = 0;
             for (uint i = 0; i < achievementCount; i++)
             {
                 string achievementId = client.SteamUserStats.GetAchievementName(i);
@@ -257,8 +436,10 @@ namespace SAM.Game
                     continue;
                 }
 
+                totalAchievements++;
                 if (protectedIds.Contains(achievementId) == true)
                 {
+                    protectedAchievements++;
                     result.SkippedProtected++;
                     continue;
                 }
@@ -297,6 +478,8 @@ namespace SAM.Game
 
             result.Unlocked = finalUnlocked;
             result.Total = finalTotal;
+            bool unlockBlocked = totalAchievements > 0 && protectedAchievements >= totalAchievements;
+            TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, unlockBlocked);
             return true;
         }
 
@@ -497,6 +680,7 @@ namespace SAM.Game
             {
                 if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
                 {
+                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
                     return true;
                 }
                 return false;
@@ -513,6 +697,7 @@ namespace SAM.Game
             {
                 if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
                 {
+                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
                     return true;
                 }
                 return false;
@@ -523,6 +708,7 @@ namespace SAM.Game
             {
                 unlocked = 0;
                 total = 0;
+                TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
                 return true;
             }
 
@@ -546,6 +732,7 @@ namespace SAM.Game
 
             unlocked = achieved;
             total = found;
+            TryUpdateAchievementStatusDatabase(client, appId, unlocked, total);
             return true;
         }
 

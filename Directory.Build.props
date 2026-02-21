@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <!-- Central pro2ect metadata: edit here once for all projects -->
+    <SAMVersion>1.1.2</SAMVersion>
+    <SAMCompany>Gibbed</SAMCompany>
+    <SAMAuthors>Gibbed</SAMAuthors>
+    <SAMRepositoryUrl>https://github.com/ppouria/SteamAchievementManager/</SAMRepositoryUrl>
+    <SAMCopyright>Copyright © Gibbed 2026</SAMCopyright>
+
+    <Version>$(SAMVersion)</Version>
+    <AssemblyVersion>$(SAMVersion).0</AssemblyVersion>
+    <FileVersion>$(SAMVersion).0</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <Company>$(SAMCompany)</Company>
+    <Authors>$(SAMAuthors)</Authors>
+    <RepositoryUrl>$(SAMRepositoryUrl)</RepositoryUrl>
+    <RepositoryType>Git</RepositoryType>
+    <Copyright>$(SAMCopyright)</Copyright>
+  </PropertyGroup>
+</Project>

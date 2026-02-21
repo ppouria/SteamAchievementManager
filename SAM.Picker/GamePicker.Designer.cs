@@ -50,6 +50,7 @@
             this._FindGamesLabel = new System.Windows.Forms.ToolStripLabel();
             this._SearchGameTextBox = new System.Windows.Forms.ToolStripTextBox();
             this._FilterDropDownButton = new System.Windows.Forms.ToolStripDropDownButton();
+            this._ThemeDropDownButton = new System.Windows.Forms.ToolStripDropDownButton();
             this._FilterGamesMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterDemosMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterModsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -62,6 +63,9 @@
             this._SortAchievementAscendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._SortAchievementDescendingMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._ShowLogsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ThemeSystemMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ThemeLightMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this._ThemeDarkMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterLoadingLabel = new System.Windows.Forms.ToolStripLabel();
             this._GameListView = new SAM.Picker.MyListView();
             this._PickerStatusStrip = new System.Windows.Forms.StatusStrip();
@@ -141,6 +145,7 @@
             this._FindGamesLabel,
             this._SearchGameTextBox,
             this._FilterDropDownButton,
+            this._ThemeDropDownButton,
             this._FilterLoadingLabel});
             this._PickerToolStrip.Location = new System.Drawing.Point(0, 0);
             this._PickerToolStrip.Name = "_PickerToolStrip";
@@ -247,6 +252,18 @@
             this._FilterDropDownButton.Size = new System.Drawing.Size(29, 22);
             this._FilterDropDownButton.Text = "Game filtering";
             //
+            // _ThemeDropDownButton
+            //
+            this._ThemeDropDownButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this._ThemeDropDownButton.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this._ThemeSystemMenuItem,
+            this._ThemeLightMenuItem,
+            this._ThemeDarkMenuItem});
+            this._ThemeDropDownButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this._ThemeDropDownButton.Name = "_ThemeDropDownButton";
+            this._ThemeDropDownButton.Size = new System.Drawing.Size(58, 22);
+            this._ThemeDropDownButton.Text = "Theme";
+            //
             // _FilterGamesMenuItem
             //
             this._FilterGamesMenuItem.Checked = true;
@@ -341,6 +358,27 @@
             this._ShowLogsMenuItem.Size = new System.Drawing.Size(258, 22);
             this._ShowLogsMenuItem.Text = "Show &logs";
             this._ShowLogsMenuItem.Click += new System.EventHandler(this.OnShowLogs);
+            //
+            // _ThemeSystemMenuItem
+            //
+            this._ThemeSystemMenuItem.Name = "_ThemeSystemMenuItem";
+            this._ThemeSystemMenuItem.Size = new System.Drawing.Size(114, 22);
+            this._ThemeSystemMenuItem.Text = "System";
+            this._ThemeSystemMenuItem.Click += new System.EventHandler(this.OnThemeSystem);
+            //
+            // _ThemeLightMenuItem
+            //
+            this._ThemeLightMenuItem.Name = "_ThemeLightMenuItem";
+            this._ThemeLightMenuItem.Size = new System.Drawing.Size(114, 22);
+            this._ThemeLightMenuItem.Text = "Light";
+            this._ThemeLightMenuItem.Click += new System.EventHandler(this.OnThemeLight);
+            //
+            // _ThemeDarkMenuItem
+            //
+            this._ThemeDarkMenuItem.Name = "_ThemeDarkMenuItem";
+            this._ThemeDarkMenuItem.Size = new System.Drawing.Size(114, 22);
+            this._ThemeDarkMenuItem.Text = "Dark";
+            this._ThemeDarkMenuItem.Click += new System.EventHandler(this.OnThemeDark);
             //
             // _FilterLoadingLabel
             //
@@ -453,6 +491,7 @@
         private System.Windows.Forms.ToolStripButton _UnlockAllButton;
         private System.Windows.Forms.ToolStripButton _UnlockSelectedButton;
         private System.Windows.Forms.ToolStripDropDownButton _FilterDropDownButton;
+        private System.Windows.Forms.ToolStripDropDownButton _ThemeDropDownButton;
         private System.Windows.Forms.ToolStripMenuItem _FilterGamesMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterIncompleteAchievementsMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _FilterJunkMenuItem;
@@ -475,6 +514,9 @@
         private System.Windows.Forms.ToolStripMenuItem _SortAchievementAscendingMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _SortAchievementDescendingMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _ShowLogsMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _ThemeSystemMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _ThemeLightMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem _ThemeDarkMenuItem;
 
         #endregion
     }
