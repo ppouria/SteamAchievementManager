@@ -113,6 +113,20 @@ namespace SAM.Picker
         private DateTime _AchievementStatusCacheLastWriteUtc;
         private DateTime _LastAchievementStatusSaveUtc;
         private bool _PendingAchievementStatusSave;
+        private Color _GameCardBackColor;
+        private Color _GameCardBorderColor;
+        private Color _GameCardSelectedBackColor;
+        private Color _GameCardSelectedBorderColor;
+        private Color _GameCardBlockedBackColor;
+        private Color _GameCardBlockedBorderColor;
+        private Color _GameCardTextColor;
+        private Color _GameCardMutedTextColor;
+        private Color _GameCardSelectedTextColor;
+        private Color _GameCardBlockedTextColor;
+        private Color _GameCardBlockedSelectedTextColor;
+        private Color _GameCardProgressTrackColor;
+        private Color _GameCardProgressFillColor;
+        private int _HoveredGameIndex = -1;
 
         private sealed class AchievementScanRequest
         {
@@ -144,12 +158,14 @@ namespace SAM.Picker
             public readonly uint GameId;
             public readonly int Unlocked;
             public readonly int Total;
+            public readonly bool? UnlockBlocked;
 
-            public AchievementScanProgress(uint gameId, int unlocked, int total)
+            public AchievementScanProgress(uint gameId, int unlocked, int total, bool? unlockBlocked = null)
             {
                 this.GameId = gameId;
                 this.Unlocked = unlocked;
                 this.Total = total;
+                this.UnlockBlocked = unlockBlocked;
             }
         }
 
@@ -172,6 +188,7 @@ namespace SAM.Picker
             public readonly int Unlocked;
             public readonly int Total;
             public readonly string Error;
+            public readonly bool? UnlockBlocked;
 
             public UnlockAllProgress(
                 uint gameId,
@@ -180,7 +197,8 @@ namespace SAM.Picker
                 int skippedProtected,
                 int unlocked,
                 int total,
-                string error)
+                string error,
+                bool? unlockBlocked = null)
             {
                 this.GameId = gameId;
                 this.Success = success;
@@ -189,6 +207,7 @@ namespace SAM.Picker
                 this.Unlocked = unlocked;
                 this.Total = total;
                 this.Error = error;
+                this.UnlockBlocked = unlockBlocked;
             }
         }
 
@@ -354,6 +373,19 @@ namespace SAM.Picker
             public override Color ButtonPressedBorder => this._menuBorderColor;
         }
 
+        private sealed class BorderlessToolStripRenderer : ToolStripProfessionalRenderer
+        {
+            public BorderlessToolStripRenderer(ProfessionalColorTable colorTable)
+                : base(colorTable)
+            {
+                this.RoundedEdges = false;
+            }
+
+            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+            {
+            }
+        }
+
         [DataContract]
         private sealed class AchievementStatusDatabase
         {
@@ -409,7 +441,11 @@ namespace SAM.Picker
 
             this._ThemeMode = ThemeMode.System;
             this.InitializeComponent();
+            this.InitializeModernNavigationLayout();
+            this._GameListView.MouseMove += this.OnGameListViewMouseMove;
+            this._GameListView.MouseLeave += this.OnGameListViewMouseLeave;
             this.UpdatePickerWindowTitle();
+            this.InitializeGroupsFeature();
 
             this._UnlockAllWorker = new BackgroundWorker()
             {
@@ -557,13 +593,23 @@ namespace SAM.Picker
 
             if (this._GameListView is MyListView listView)
             {
-                listView.UseDarkScrollBars = this._IsDarkThemeActive;
+                // Keep the ListView behavior standard and apply the same themed scrollbar path as page panels.
+                listView.UseDarkScrollBars = false;
+            }
+
+            this.ApplyScrollableControlTheme(this._GameListView);
+        }
+
+        private void ApplyScrollableControlTheme(Control control)
+        {
+            if (control == null || control.IsHandleCreated == false)
+            {
                 return;
             }
 
             try
             {
-                SetWindowTheme(this._GameListView.Handle, this._IsDarkThemeActive == true ? "DarkMode_Explorer" : "Explorer", null);
+                SetWindowTheme(control.Handle, this._IsDarkThemeActive == true ? "DarkMode_Explorer" : "Explorer", null);
             }
             catch (EntryPointNotFoundException)
             {
@@ -571,6 +617,14 @@ namespace SAM.Picker
             catch (DllNotFoundException)
             {
             }
+        }
+
+        private void ApplyPageScrollBarTheme()
+        {
+            this.ApplyScrollableControlTheme(this._GameListView);
+            this.ApplyScrollableControlTheme(this._SettingsSectionsFlow);
+            this.ApplyScrollableControlTheme(this._GroupsPageCardsPanel);
+            this.ApplyScrollableControlTheme(this._GroupsSidebarListBox);
         }
 
         private ThemeMode GetResolvedThemeMode()
@@ -611,13 +665,114 @@ namespace SAM.Picker
 
             this._IsDarkThemeActive = this.GetResolvedThemeMode() == ThemeMode.Dark;
 
-            Color windowBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(30, 32, 37) : Color.FromArgb(242, 242, 247);
-            Color foregroundColor = this._IsDarkThemeActive == true ? Color.FromArgb(232, 235, 241) : Color.FromArgb(24, 24, 28);
-            Color mutedTextColor = this._IsDarkThemeActive == true ? Color.FromArgb(168, 173, 184) : Color.FromArgb(110, 110, 116);
-            Color inputBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(46, 49, 56) : Color.White;
-            Color toolStripBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(38, 40, 46) : Color.FromArgb(252, 252, 253);
-            Color statusBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 41) : Color.FromArgb(248, 248, 250);
-            Color listBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(36, 38, 44) : Color.White;
+            Color accentColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(92, 166, 255)
+                : Color.FromArgb(46, 119, 230);
+            Color windowBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(13, 23, 35)
+                : Color.FromArgb(239, 245, 252);
+            Color foregroundColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(230, 238, 249)
+                : Color.FromArgb(24, 41, 69);
+            Color mutedTextColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(157, 174, 198)
+                : Color.FromArgb(96, 116, 146);
+            Color inputBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(24, 35, 50)
+                : Color.White;
+            Color toolStripBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(17, 29, 44)
+                : Color.FromArgb(255, 255, 255);
+            Color statusBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(16, 27, 41)
+                : Color.FromArgb(245, 249, 255);
+            Color listBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(15, 27, 43)
+                : Color.FromArgb(250, 253, 255);
+            Color summaryCardBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(20, 33, 50)
+                : Color.FromArgb(255, 255, 255);
+            Color summaryCardMutedTextColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(168, 184, 205)
+                : Color.FromArgb(103, 121, 151);
+            Color sidebarBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(19, 31, 46)
+                : Color.FromArgb(247, 251, 255);
+            Color sidebarButtonBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(26, 42, 62)
+                : Color.FromArgb(255, 255, 255);
+            Color sidebarButtonBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(55, 76, 104)
+                : Color.FromArgb(205, 221, 241);
+            Color sidebarCardBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(25, 41, 61)
+                : Color.FromArgb(255, 255, 255);
+            Color sidebarCardBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(58, 80, 110)
+                : Color.FromArgb(214, 227, 244);
+            Color sidebarCardSelectedBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(33, 58, 88)
+                : Color.FromArgb(232, 242, 255);
+            Color sidebarCardSelectedBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(105, 172, 255)
+                : Color.FromArgb(86, 140, 231);
+            Color navigationSidebarBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(14, 25, 39)
+                : Color.FromArgb(246, 251, 255);
+            Color navigationPageBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(12, 22, 36)
+                : Color.FromArgb(242, 248, 255);
+            Color navigationCardBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(22, 36, 56)
+                : Color.FromArgb(255, 255, 255);
+            Color navigationCardBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(48, 68, 96)
+                : Color.FromArgb(212, 225, 242);
+            Color navigationButtonBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(23, 39, 60)
+                : Color.FromArgb(255, 255, 255);
+            Color navigationButtonBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(51, 72, 101)
+                : Color.FromArgb(201, 219, 242);
+            Color navigationButtonActiveBackColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(34, 58, 88)
+                : Color.FromArgb(228, 241, 255);
+            Color navigationButtonActiveBorderColor = this._IsDarkThemeActive == true
+                ? Color.FromArgb(106, 175, 255)
+                : Color.FromArgb(77, 132, 229);
+
+            if (this._IsDarkThemeActive == true)
+            {
+                this._GameCardBackColor = Color.FromArgb(26, 40, 60);
+                this._GameCardBorderColor = Color.FromArgb(54, 75, 103);
+                this._GameCardSelectedBackColor = Color.FromArgb(37, 67, 103);
+                this._GameCardSelectedBorderColor = Color.FromArgb(95, 166, 255);
+                this._GameCardBlockedBackColor = Color.FromArgb(85, 45, 55);
+                this._GameCardBlockedBorderColor = Color.FromArgb(163, 88, 102);
+                this._GameCardTextColor = Color.FromArgb(230, 237, 248);
+                this._GameCardMutedTextColor = Color.FromArgb(171, 187, 211);
+                this._GameCardSelectedTextColor = Color.FromArgb(245, 249, 255);
+                this._GameCardBlockedTextColor = Color.FromArgb(255, 220, 225);
+                this._GameCardBlockedSelectedTextColor = Color.FromArgb(255, 240, 244);
+                this._GameCardProgressTrackColor = Color.FromArgb(53, 73, 100);
+                this._GameCardProgressFillColor = Color.FromArgb(105, 178, 255);
+            }
+            else
+            {
+                this._GameCardBackColor = Color.White;
+                this._GameCardBorderColor = Color.FromArgb(213, 225, 239);
+                this._GameCardSelectedBackColor = Color.FromArgb(228, 240, 255);
+                this._GameCardSelectedBorderColor = Color.FromArgb(76, 130, 230);
+                this._GameCardBlockedBackColor = Color.FromArgb(255, 235, 239);
+                this._GameCardBlockedBorderColor = Color.FromArgb(236, 162, 174);
+                this._GameCardTextColor = Color.FromArgb(25, 45, 74);
+                this._GameCardMutedTextColor = Color.FromArgb(102, 124, 154);
+                this._GameCardSelectedTextColor = Color.FromArgb(17, 57, 130);
+                this._GameCardBlockedTextColor = Color.FromArgb(129, 35, 50);
+                this._GameCardBlockedSelectedTextColor = Color.FromArgb(116, 24, 37);
+                this._GameCardProgressTrackColor = Color.FromArgb(213, 225, 239);
+                this._GameCardProgressFillColor = Color.FromArgb(75, 131, 230);
+            }
 
             this.BackColor = windowBackColor;
             this.ForeColor = foregroundColor;
@@ -638,21 +793,21 @@ namespace SAM.Picker
             {
                 DarkToolStripColorTable stripColorTable = new(
                     toolStripBackColor,
-                    Color.FromArgb(43, 46, 54),
-                    Color.FromArgb(68, 73, 84),
-                    Color.FromArgb(67, 95, 150),
-                    Color.FromArgb(78, 111, 173),
-                    Color.FromArgb(56, 61, 70));
+                    Color.FromArgb(24, 38, 57),
+                    Color.FromArgb(61, 82, 112),
+                    BlendColor(toolStripBackColor, accentColor, 0.45f),
+                    BlendColor(toolStripBackColor, accentColor, 0.58f),
+                    Color.FromArgb(50, 69, 95));
                 this._DarkToolStripRenderer = new ToolStripProfessionalRenderer(
                     stripColorTable);
-                this._DarkStatusStripRenderer = new ToolStripProfessionalRenderer(
+                this._DarkStatusStripRenderer = new BorderlessToolStripRenderer(
                     new DarkToolStripColorTable(
                         statusBackColor,
-                        Color.FromArgb(43, 46, 54),
-                        Color.FromArgb(68, 73, 84),
-                        Color.FromArgb(67, 95, 150),
-                        Color.FromArgb(78, 111, 173),
-                        Color.FromArgb(56, 61, 70)));
+                        Color.FromArgb(24, 38, 57),
+                        Color.FromArgb(61, 82, 112),
+                        BlendColor(statusBackColor, accentColor, 0.45f),
+                        BlendColor(statusBackColor, accentColor, 0.58f),
+                        Color.FromArgb(50, 69, 95)));
                 this._PickerToolStrip.Renderer = this._DarkToolStripRenderer;
                 this._PickerStatusStrip.Renderer = this._DarkStatusStripRenderer;
             }
@@ -662,7 +817,7 @@ namespace SAM.Picker
                 this._PickerStatusStrip.RenderMode = ToolStripRenderMode.System;
             }
 
-            this.StyleToolStripButton(this._RefreshGamesButton);
+            this.StyleToolStripButton(this._RefreshGamesButton, imageOnly: true);
             this.StyleToolStripButton(this._AddGameButton);
             this.StyleToolStripButton(this._ConfigureAuthButton);
             this.StyleToolStripButton(this._CheckAllButton);
@@ -670,6 +825,7 @@ namespace SAM.Picker
             this.StyleToolStripButton(this._UnlockSelectedButton);
             this.StyleToolStripDropDownButton(this._FilterDropDownButton, "Filters");
             this.StyleToolStripDropDownButton(this._ThemeDropDownButton, this._ThemeDropDownButton.Text);
+            this.ApplyGroupsToolStripTheme();
 
             this._AddGameTextBox.AutoSize = false;
             this._AddGameTextBox.Size = new Size(96, 28);
@@ -709,20 +865,66 @@ namespace SAM.Picker
 
             this.ApplyDarkThemeToDropDown(
                 this._FilterDropDownButton,
-                this._IsDarkThemeActive == true ? Color.FromArgb(43, 46, 54) : Color.White,
+                this._IsDarkThemeActive == true ? Color.FromArgb(24, 38, 57) : Color.White,
                 this.ForeColor);
             this.ApplyDarkThemeToDropDown(
                 this._ThemeDropDownButton,
-                this._IsDarkThemeActive == true ? Color.FromArgb(43, 46, 54) : Color.White,
+                this._IsDarkThemeActive == true ? Color.FromArgb(24, 38, 57) : Color.White,
                 this.ForeColor);
 
             this._FilterLoadingLabel.ForeColor = mutedTextColor;
             this._FilterLoadingLabel.Alignment = ToolStripItemAlignment.Right;
 
+            this._SummaryCardPanel.BackColor = summaryCardBackColor;
+            this._SummaryCardPanel.ForeColor = this.ForeColor;
+            this._SummaryCardPanel.BorderStyle = BorderStyle.None;
+            this._SummaryTitleLabel.ForeColor = this.ForeColor;
+            this._SummaryTitleLabel.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold, GraphicsUnit.Point);
+            this._SummaryDetailsLabel.ForeColor = summaryCardMutedTextColor;
+            this._SummaryDetailsLabel.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
+            this._SummaryMetricsTable.BackColor = Color.Transparent;
+            this._SummaryGamesLabel.ForeColor = this.ForeColor;
+            this._SummaryGamesLabel.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold, GraphicsUnit.Point);
+            this._SummaryAchievementsLabel.ForeColor = this.ForeColor;
+            this._SummaryAchievementsLabel.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold, GraphicsUnit.Point);
+            this._SummaryUnlockedLabel.ForeColor = this.ForeColor;
+            this._SummaryUnlockedLabel.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold, GraphicsUnit.Point);
+            this._SummaryCompletionLabel.ForeColor = this.ForeColor;
+            this._SummaryCompletionLabel.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold, GraphicsUnit.Point);
+
             this._GameListView.BackColor = listBackColor;
             this._GameListView.ForeColor = this.ForeColor;
             this._GameListView.BorderStyle = BorderStyle.None;
             this._GameListView.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+
+            if (this._DashboardSplitContainer != null)
+            {
+                this._DashboardSplitContainer.BackColor = windowBackColor;
+                this._DashboardSplitContainer.Panel1.BackColor = windowBackColor;
+                this._DashboardSplitContainer.Panel2.BackColor = sidebarBackColor;
+            }
+
+            this.ApplyGroupsSidebarTheme(
+                sidebarBackColor,
+                sidebarButtonBackColor,
+                sidebarButtonBorderColor,
+                sidebarCardBackColor,
+                sidebarCardBorderColor,
+                sidebarCardSelectedBackColor,
+                sidebarCardSelectedBorderColor,
+                accentColor,
+                mutedTextColor);
+            this.ApplyNavigationTheme(
+                navigationSidebarBackColor,
+                navigationPageBackColor,
+                navigationCardBackColor,
+                navigationCardBorderColor,
+                navigationButtonBackColor,
+                navigationButtonBorderColor,
+                navigationButtonActiveBackColor,
+                navigationButtonActiveBorderColor,
+                mutedTextColor,
+                accentColor);
 
             this._PickerStatusStrip.SizingGrip = false;
             this._PickerStatusStrip.BackColor = statusBackColor;
@@ -732,13 +934,23 @@ namespace SAM.Picker
 
             this.ApplyWindowDarkTitleBar();
             this.ApplyListViewScrollBarTheme();
+            this.ApplyPageScrollBarTheme();
             this.UpdateThemeMenuState();
+            this.UpdateSummaryCard();
+            this.UpdateGroupsSidebarActionState();
+            this.UpdateGroupsPageState();
+            this.SyncSettingsPageControls();
+            this.UpdateGamesLoadingState(
+                this._ListWorker.IsBusy == true ||
+                this._AchievementWorker.IsBusy == true ||
+                this._UnlockAllWorker.IsBusy == true ||
+                this.IsGroupRunBusy == true);
             this._GameListView.Invalidate();
 
             this.ResumeLayout(true);
         }
 
-        private void StyleToolStripButton(ToolStripButton button)
+        private void StyleToolStripButton(ToolStripButton button, bool imageOnly = false)
         {
             if (button == null)
             {
@@ -750,6 +962,16 @@ namespace SAM.Picker
             button.TextImageRelation = TextImageRelation.ImageBeforeText;
             button.Padding = new Padding(8, 0, 8, 0);
             button.Margin = new Padding(0, 0, 4, 0);
+
+            if (imageOnly == true)
+            {
+                button.DisplayStyle = ToolStripItemDisplayStyle.Image;
+                if (string.IsNullOrWhiteSpace(button.ToolTipText) == true)
+                {
+                    button.ToolTipText = "Refresh";
+                }
+                return;
+            }
 
             if (button.Image == null)
             {
@@ -1755,6 +1977,11 @@ namespace SAM.Picker
                     continue;
                 }
 
+                if (this.IsGameFilteredOutByGroup(info.Id) == true)
+                {
+                    continue;
+                }
+
                 bool wanted = info.Type switch
                 {
                     "normal" => wantNormals,
@@ -1844,21 +2071,152 @@ namespace SAM.Picker
 
         private void UpdateUnlockSelectedButtonVisibility()
         {
-            if (this._UnlockSelectedButton == null)
+            int selectedCount = this.GetSelectedVisibleGameIds().Count;
+            bool hasVisibleGames = this._FilteredGames.Count > 0;
+            bool hasGames = this._Games.Count > 0;
+            bool isBusy = this._ListWorker?.IsBusy == true ||
+                          this._AchievementWorker?.IsBusy == true ||
+                          this._UnlockAllWorker?.IsBusy == true ||
+                          this.IsGroupRunBusy == true;
+
+            if (this._UnlockSelectedButton != null)
+            {
+                this._UnlockSelectedButton.Visible = selectedCount > 0;
+                this._UnlockSelectedButton.Enabled = selectedCount > 0 && isBusy == false;
+                this._UnlockSelectedButton.Text = $"Unlock Selected ({selectedCount})";
+            }
+
+            if (this._CheckAllButton != null)
+            {
+                this._CheckAllButton.Enabled = hasGames == true && isBusy == false;
+            }
+
+            if (this._UnlockAllButton != null)
+            {
+                this._UnlockAllButton.Enabled = hasVisibleGames == true && isBusy == false;
+            }
+
+            if (this._GamesCheckAllButton != null)
+            {
+                this._GamesCheckAllButton.Enabled = hasGames == true && isBusy == false;
+            }
+
+            if (this._GamesUnlockAllButton != null)
+            {
+                this._GamesUnlockAllButton.Enabled = hasVisibleGames == true && isBusy == false;
+            }
+
+            if (this._GamesUnlockSelectedButton != null)
+            {
+                this._GamesUnlockSelectedButton.Visible = selectedCount > 0;
+                this._GamesUnlockSelectedButton.Enabled = selectedCount > 0 && isBusy == false;
+                this._GamesUnlockSelectedButton.Text = $"Unlock Selected ({selectedCount})";
+            }
+        }
+
+        private void UpdateSummaryCard()
+        {
+            if (this._SummaryGamesLabel == null ||
+                this._SummaryAchievementsLabel == null ||
+                this._SummaryUnlockedLabel == null ||
+                this._SummaryCompletionLabel == null ||
+                this._SummaryDetailsLabel == null ||
+                this._SummaryTitleLabel == null)
             {
                 return;
             }
 
-            int selectedCount = this.GetSelectedVisibleGameIds().Count;
-            this._UnlockSelectedButton.Visible = selectedCount > 0;
-            this._UnlockSelectedButton.Enabled = selectedCount > 0;
-            this._UnlockSelectedButton.Text = $"Unlock Selected ({selectedCount})";
+            int totalGames = this._Games.Count;
+            int visibleGames = this._FilteredGames.Count;
+            int scannedGames = 0;
+            int incompleteGames = 0;
+            long totalAchievements = 0;
+            long unlockedAchievements = 0;
+            foreach (GameInfo info in this._Games.Values)
+            {
+                if (info?.HasAchievementProgress != true)
+                {
+                    continue;
+                }
+
+                scannedGames++;
+
+                int total = info.AchievementTotal;
+                int unlocked = info.AchievementUnlocked;
+                if (total < 0)
+                {
+                    total = 0;
+                }
+                if (unlocked < 0)
+                {
+                    unlocked = 0;
+                }
+                if (unlocked > total)
+                {
+                    unlocked = total;
+                }
+
+                totalAchievements += total;
+                unlockedAchievements += unlocked;
+                if (total > 0 && unlocked < total)
+                {
+                    incompleteGames++;
+                }
+            }
+
+            string completionText = "n/a";
+            if (totalAchievements > 0)
+            {
+                double completion = (double)unlockedAchievements / totalAchievements * 100.0;
+                completionText = $"{completion.ToString("0.##", CultureInfo.CurrentCulture)}%";
+            }
+
+            string totalGamesText = totalGames.ToString("N0", CultureInfo.CurrentCulture);
+            string scannedGamesText = scannedGames.ToString("N0", CultureInfo.CurrentCulture);
+            string activeGroupFilterName = this.GetActiveGroupFilterName();
+            this._SummaryTitleLabel.Text = string.IsNullOrWhiteSpace(activeGroupFilterName) == true
+                ? "Steam Overview"
+                : $"Steam Overview ({activeGroupFilterName})";
+            this._SummaryDetailsLabel.Text =
+                $"{visibleGames.ToString("N0", CultureInfo.CurrentCulture)} visible • " +
+                $"{scannedGamesText}/{totalGamesText} scanned • " +
+                $"{incompleteGames.ToString("N0", CultureInfo.CurrentCulture)} incomplete";
+            this._SummaryGamesLabel.Text =
+                $"Games{Environment.NewLine}{totalGamesText}";
+            this._SummaryAchievementsLabel.Text =
+                $"Achievements{Environment.NewLine}{totalAchievements.ToString("N0", CultureInfo.CurrentCulture)}";
+            this._SummaryUnlockedLabel.Text =
+                $"Unlocked{Environment.NewLine}{unlockedAchievements.ToString("N0", CultureInfo.CurrentCulture)}";
+            this._SummaryCompletionLabel.Text =
+                $"Completion{Environment.NewLine}{completionText}";
+            this.UpdateOverviewStats(
+                totalGames,
+                visibleGames,
+                scannedGames,
+                incompleteGames,
+                totalAchievements,
+                unlockedAchievements,
+                completionText);
         }
 
         private void UpdatePickerStatus()
         {
+            this.UpdateSummaryCard();
+
             string message = $"Displaying {this._FilteredGames.Count} games. Total {this._Games.Count} games.";
-            if (this._UnlockAllWorker.IsBusy == true)
+            string activeGroupFilterName = this.GetActiveGroupFilterName();
+            if (string.IsNullOrWhiteSpace(activeGroupFilterName) == false)
+            {
+                message += $" Group filter: {activeGroupFilterName}.";
+            }
+            if (this.IsGroupRunBusy == true)
+            {
+                string groupName = string.IsNullOrWhiteSpace(this._GroupRunName) == false
+                    ? this._GroupRunName
+                    : "unnamed";
+                message += $" Running group \"{groupName}\" {this._GroupRunCompleted}/{this._GroupRunTotal}...";
+            }
+            else if (this._UnlockAllWorker.IsBusy == true)
             {
                 message += $" Unlocking achievements {this._UnlockAllCompleted}/{this._UnlockAllTotal}...";
             }
@@ -1877,6 +2235,9 @@ namespace SAM.Picker
 
             this._PickerStatusLabel.Text = message;
             this.UpdateLoadingIndicator();
+            this.UpdateGroupsSidebarActionState();
+            this.UpdateGroupsPageState();
+            this.UpdateGamesGroupFilterButtonState();
         }
 
         private string GetActiveScanModeLabel()
@@ -1897,15 +2258,20 @@ namespace SAM.Picker
         {
             bool loading = this._ListWorker.IsBusy == true ||
                            this._AchievementWorker.IsBusy == true ||
-                           this._UnlockAllWorker.IsBusy == true;
+                           this._UnlockAllWorker.IsBusy == true ||
+                           this.IsGroupRunBusy == true;
             if (loading == false)
             {
                 this._LoadingSpinnerTimer.Enabled = false;
                 this._FilterLoadingLabel.Visible = false;
+                this.UpdateGamesLoadingState(false);
+                this.UpdateUnlockSelectedButtonVisibility();
                 return;
             }
 
             this._FilterLoadingLabel.Visible = true;
+            this.UpdateGamesLoadingState(true);
+            this.UpdateUnlockSelectedButtonVisibility();
             if (this._LoadingSpinnerTimer.Enabled == false)
             {
                 this._LoadingSpinnerFrame = 0;
@@ -1918,11 +2284,13 @@ namespace SAM.Picker
         {
             bool loading = this._ListWorker.IsBusy == true ||
                            this._AchievementWorker.IsBusy == true ||
-                           this._UnlockAllWorker.IsBusy == true;
+                           this._UnlockAllWorker.IsBusy == true ||
+                           this.IsGroupRunBusy == true;
             if (loading == false)
             {
                 this._LoadingSpinnerTimer.Enabled = false;
                 this._FilterLoadingLabel.Visible = false;
+                this.UpdateGamesLoadingState(false);
                 return;
             }
 
@@ -2755,6 +3123,7 @@ namespace SAM.Picker
         private void ApplyViewMode(GameViewMode mode, bool persist)
         {
             this._ViewMode = mode;
+            this._HoveredGameIndex = -1;
             this._ViewGridMenuItem.Checked = mode == GameViewMode.Grid;
             this._ViewListMenuItem.Checked = mode == GameViewMode.List;
 
@@ -2785,6 +3154,7 @@ namespace SAM.Picker
             }
 
             this._GameListView.Invalidate();
+            this.SyncSettingsPageControls();
         }
 
         private void ApplySortMode(GameSortMode mode, bool persist, bool refresh)
@@ -2805,6 +3175,8 @@ namespace SAM.Picker
             {
                 this.RefreshGames();
             }
+
+            this.SyncSettingsPageControls();
         }
 
         private void EnsureListColumn()
@@ -2867,6 +3239,12 @@ namespace SAM.Picker
 
         private void StartAchievementScan()
         {
+            if (this.IsGroupRunBusy == true)
+            {
+                this._AchievementScanPending = true;
+                return;
+            }
+
             if (this._UnlockAllWorker.IsBusy == true)
             {
                 this._AchievementScanPending = true;
@@ -2916,11 +3294,13 @@ namespace SAM.Picker
 
         private void StartCheckAllScan()
         {
-            if (this._AchievementWorker.IsBusy == true || this._UnlockAllWorker.IsBusy == true)
+            if (this.IsGroupRunBusy == true ||
+                this._AchievementWorker.IsBusy == true ||
+                this._UnlockAllWorker.IsBusy == true)
             {
                 MessageBox.Show(
                     this,
-                    "Achievement scanning is already in progress.",
+                    "Another operation is already in progress.",
                     "Info",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -2990,7 +3370,8 @@ namespace SAM.Picker
         {
             if (this._ListWorker.IsBusy == true ||
                 this._AchievementWorker.IsBusy == true ||
-                this._UnlockAllWorker.IsBusy == true)
+                this._UnlockAllWorker.IsBusy == true ||
+                this.IsGroupRunBusy == true)
             {
                 MessageBox.Show(
                     this,
@@ -3062,6 +3443,7 @@ namespace SAM.Picker
                     out int skippedProtected,
                     out int unlocked,
                     out int total,
+                    out bool? unlockBlocked,
                     out string error);
 
                 int progress = Interlocked.Increment(ref completed);
@@ -3074,7 +3456,8 @@ namespace SAM.Picker
                         skippedProtected,
                         unlocked,
                         total,
-                        error));
+                        error,
+                        unlockBlocked));
             }
         }
 
@@ -3087,13 +3470,36 @@ namespace SAM.Picker
 
             this._UnlockAllCompleted = e.ProgressPercentage;
 
-            if (this._Games.TryGetValue(progress.GameId, out var game) == true &&
-                progress.Unlocked >= 0 &&
-                progress.Total >= 0)
+            if (this._Games.TryGetValue(progress.GameId, out var game) == true)
             {
-                game.AchievementUnlocked = progress.Unlocked;
-                game.AchievementTotal = progress.Total;
-                this.QueueAchievementStatusDatabaseSave(false);
+                bool statusChanged = false;
+                if (progress.Unlocked >= 0 &&
+                    progress.Total >= 0)
+                {
+                    game.AchievementUnlocked = progress.Unlocked;
+                    game.AchievementTotal = progress.Total;
+                    statusChanged = true;
+                }
+
+                bool? unlockBlocked = progress.UnlockBlocked;
+                if (unlockBlocked.HasValue == false &&
+                    progress.Total >= 0 &&
+                    progress.SkippedProtected >= 0)
+                {
+                    unlockBlocked = progress.Total > 0 && progress.SkippedProtected >= progress.Total;
+                }
+
+                if (unlockBlocked.HasValue == true &&
+                    game.AchievementUnlockBlocked != unlockBlocked.Value)
+                {
+                    game.AchievementUnlockBlocked = unlockBlocked.Value;
+                    statusChanged = true;
+                }
+
+                if (statusChanged == true)
+                {
+                    this.QueueAchievementStatusDatabaseSave(false);
+                }
             }
 
             if (progress.Success == true)
@@ -3236,14 +3642,16 @@ namespace SAM.Picker
                 if (TryGetAchievementProgressFromLocalProcess(
                         gameId,
                         out int unlocked,
-                        out int total) == false)
+                        out int total,
+                        out bool? unlockBlocked) == false)
                 {
                     unlocked = -1;
                     total = -1;
+                    unlockBlocked = null;
                 }
 
                 int progress = Interlocked.Increment(ref completed);
-                worker.ReportProgress(progress, new AchievementScanProgress(gameId, unlocked, total));
+                worker.ReportProgress(progress, new AchievementScanProgress(gameId, unlocked, total, unlockBlocked));
             }
         }
 
@@ -3298,10 +3706,23 @@ namespace SAM.Picker
 
             if (this._Games.TryGetValue(progress.GameId, out var game) == true)
             {
+                bool statusChanged = false;
                 if (progress.Unlocked >= 0 && progress.Total >= 0)
                 {
                     game.AchievementUnlocked = progress.Unlocked;
                     game.AchievementTotal = progress.Total;
+                    statusChanged = true;
+                }
+
+                if (progress.UnlockBlocked.HasValue == true &&
+                    game.AchievementUnlockBlocked != progress.UnlockBlocked.Value)
+                {
+                    game.AchievementUnlockBlocked = progress.UnlockBlocked.Value;
+                    statusChanged = true;
+                }
+
+                if (statusChanged == true)
+                {
                     this.QueueAchievementStatusDatabaseSave(false);
                 }
             }
@@ -3343,10 +3764,12 @@ namespace SAM.Picker
         private static bool TryGetAchievementProgressFromLocalProcess(
             uint gameId,
             out int unlocked,
-            out int total)
+            out int total,
+            out bool? unlockBlocked)
         {
             unlocked = -1;
             total = -1;
+            unlockBlocked = null;
 
             string arguments = _($"--achievement-progress {gameId.ToString(CultureInfo.InvariantCulture)}");
             ProcessStartInfo startInfo = new()
@@ -3386,7 +3809,7 @@ namespace SAM.Picker
                     return false;
                 }
 
-                if (TryParseLocalProcessOutput(stdout, out unlocked, out total) == true)
+                if (TryParseLocalProcessOutput(stdout, out unlocked, out total, out unlockBlocked) == true)
                 {
                     AppendAchievementScanLog(gameId, $"Local process progress {unlocked}/{total}.");
                     return true;
@@ -3421,12 +3844,14 @@ namespace SAM.Picker
             out int skippedProtected,
             out int unlocked,
             out int total,
+            out bool? unlockBlocked,
             out string error)
         {
             changed = 0;
             skippedProtected = 0;
             unlocked = -1;
             total = -1;
+            unlockBlocked = null;
             error = null;
 
             string arguments = _($"--unlock-all {gameId.ToString(CultureInfo.InvariantCulture)}");
@@ -3473,6 +3898,7 @@ namespace SAM.Picker
                         out skippedProtected,
                         out unlocked,
                         out total,
+                        out unlockBlocked,
                         out error) == true)
                 {
                     return true;
@@ -3510,12 +3936,14 @@ namespace SAM.Picker
             out int skippedProtected,
             out int unlocked,
             out int total,
+            out bool? unlockBlocked,
             out string error)
         {
             changed = 0;
             skippedProtected = 0;
             unlocked = -1;
             total = -1;
+            unlockBlocked = null;
             error = null;
 
             if (string.IsNullOrWhiteSpace(output) == true)
@@ -3568,14 +3996,33 @@ namespace SAM.Picker
             {
                 error = "invalid_output";
             }
+            else
+            {
+                if (parts.Length >= 6)
+                {
+                    unlockBlocked = ParseOptionalUnlockBlockedToken(parts[5]);
+                }
+
+                if (unlockBlocked.HasValue == false &&
+                    skippedProtected >= 0 &&
+                    total >= 0)
+                {
+                    unlockBlocked = total > 0 && skippedProtected >= total;
+                }
+            }
 
             return parsed;
         }
 
-        private static bool TryParseLocalProcessOutput(string output, out int unlocked, out int total)
+        private static bool TryParseLocalProcessOutput(
+            string output,
+            out int unlocked,
+            out int total,
+            out bool? unlockBlocked)
         {
             unlocked = -1;
             total = -1;
+            unlockBlocked = null;
 
             if (string.IsNullOrWhiteSpace(output) == true)
             {
@@ -3601,8 +4048,49 @@ namespace SAM.Picker
                 return false;
             }
 
-            return int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
-                   int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true;
+            bool parsed = int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out unlocked) == true &&
+                          int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out total) == true;
+            if (parsed == false)
+            {
+                return false;
+            }
+
+            if (parts.Length >= 3)
+            {
+                unlockBlocked = ParseOptionalUnlockBlockedToken(parts[2]);
+            }
+
+            return true;
+        }
+
+        private static bool? ParseOptionalUnlockBlockedToken(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token) == true)
+            {
+                return null;
+            }
+
+            if (int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric) == true)
+            {
+                if (numeric > 0)
+                {
+                    return true;
+                }
+
+                if (numeric == 0)
+                {
+                    return false;
+                }
+
+                return null;
+            }
+
+            if (bool.TryParse(token, out bool value) == true)
+            {
+                return value;
+            }
+
+            return null;
         }
 
         private static bool TryGetAchievementProgressFromWebApi(
@@ -4213,6 +4701,17 @@ namespace SAM.Picker
 
         private void AddGames()
         {
+            if (this.IsGroupRunBusy == true)
+            {
+                MessageBox.Show(
+                    this,
+                    "A group run is currently in progress. Please wait for it to finish.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
             ClearAchievementScanLog();
             if (this._ListWorker.IsBusy == true)
             {
@@ -4269,6 +4768,7 @@ namespace SAM.Picker
             base.OnHandleCreated(e);
             this.ApplyWindowDarkTitleBar();
             this.ApplyListViewScrollBarTheme();
+            this.ApplyPageScrollBarTheme();
         }
 
         protected override void OnActivated(EventArgs e)
@@ -4376,10 +4876,23 @@ namespace SAM.Picker
         private void OnGameSelectionChanged(object sender, EventArgs e)
         {
             this.UpdateUnlockSelectedButtonVisibility();
+            this.UpdateGroupsSidebarActionState();
+            this.UpdateGroupsPageState();
         }
 
         private void OnAddGame(object sender, EventArgs e)
         {
+            if (this.IsGroupRunBusy == true)
+            {
+                MessageBox.Show(
+                    this,
+                    "A group run is currently in progress. Please wait for it to finish.",
+                    "Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
             uint id;
 
             if (TryParseAppIdFromAddGameInput(this._AddGameTextBox.Text, out id) == false)
@@ -4430,15 +4943,30 @@ namespace SAM.Picker
 
         private void OnFilterUpdate(object sender, EventArgs e)
         {
+            if (this._SuppressGamesToolbarSync == true)
+            {
+                return;
+            }
+
             if (this._FilterIncompleteAchievementsMenuItem.Checked == true)
             {
                 this.StartAchievementScan();
             }
 
             this.RefreshGames();
+            this.SyncGamesToolbarState();
 
             // Compatibility with _GameListView SearchForVirtualItemEventHandler (otherwise _SearchGameTextBox loose focus on KeyUp)
-            this._SearchGameTextBox.Focus();
+            if (this._CurrentDashboardPage == DashboardPage.Games &&
+                this._GamesSearchInput != null &&
+                this._GamesSearchInput.Visible == true)
+            {
+                this._GamesSearchInput.FocusEditor();
+            }
+            else
+            {
+                this._SearchGameTextBox.Focus();
+            }
         }
 
         private void OnViewGrid(object sender, EventArgs e)
@@ -4535,6 +5063,41 @@ namespace SAM.Picker
             this.ResizeListColumn();
         }
 
+        private void OnGameListViewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (this._ViewMode != GameViewMode.Grid ||
+                this._GameListView.IsDisposed == true)
+            {
+                return;
+            }
+
+            int hoveredIndex = -1;
+            ListViewHitTestInfo hit = this._GameListView.HitTest(e.Location);
+            if (hit?.Item != null)
+            {
+                hoveredIndex = hit.Item.Index;
+            }
+
+            if (hoveredIndex == this._HoveredGameIndex)
+            {
+                return;
+            }
+
+            this._HoveredGameIndex = hoveredIndex;
+            this._GameListView.Invalidate();
+        }
+
+        private void OnGameListViewMouseLeave(object sender, EventArgs e)
+        {
+            if (this._HoveredGameIndex < 0)
+            {
+                return;
+            }
+
+            this._HoveredGameIndex = -1;
+            this._GameListView.Invalidate();
+        }
+
         private void OnGameListViewDrawItem(object sender, DrawListViewItemEventArgs e)
         {
             if (e.ItemIndex < 0 || e.ItemIndex >= this._FilteredGames.Count)
@@ -4570,24 +5133,43 @@ namespace SAM.Picker
             }
 
             bool selected = this._GameListView.SelectedIndices.Contains(e.ItemIndex);
+            bool hovered = this._HoveredGameIndex == e.ItemIndex;
             bool blocked = info.AchievementUnlockBlocked == true;
+
             Color cardColor = blocked == true
                 ? (selected == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(130, 56, 65) : Color.FromArgb(255, 210, 216))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(92, 46, 52) : Color.FromArgb(255, 226, 229)))
-                : (selected == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(59, 97, 168) : Color.FromArgb(220, 233, 255))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(45, 48, 56) : Color.White));
+                    ? BlendColor(this._GameCardBlockedBackColor, this._GameCardSelectedBackColor, 0.35f)
+                    : this._GameCardBlockedBackColor)
+                : (selected == true ? this._GameCardSelectedBackColor : this._GameCardBackColor);
+            if (hovered == true && selected == false)
+            {
+                cardColor = BlendColor(cardColor, this._GameCardSelectedBackColor, 0.20f);
+            }
+
             Color borderColor = blocked == true
-                ? (selected == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 156, 170) : Color.FromArgb(220, 84, 102))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(206, 101, 115) : Color.FromArgb(231, 145, 157)))
-                : (selected == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(114, 162, 255) : Color.FromArgb(72, 124, 244))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(62, 67, 76) : Color.FromArgb(226, 228, 233)));
+                ? this._GameCardBlockedBorderColor
+                : (selected == true ? this._GameCardSelectedBorderColor : this._GameCardBorderColor);
+            if (hovered == true && selected == false && blocked == false)
+            {
+                borderColor = BlendColor(borderColor, this._GameCardSelectedBorderColor, 0.50f);
+            }
+
+            Rectangle drawRect = cardRect;
+            if (hovered == true && selected == false)
+            {
+                drawRect = new Rectangle(cardRect.X, Math.Max(0, cardRect.Y - 1), cardRect.Width, cardRect.Height);
+            }
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath path = CreateRoundedRectanglePath(cardRect, 10))
+            if (hovered == true)
+            {
+                Rectangle shadowRect = new(drawRect.X + 1, drawRect.Y + 2, drawRect.Width, drawRect.Height);
+                using GraphicsPath shadowPath = CreateRoundedRectanglePath(shadowRect, 12);
+                using SolidBrush shadowBrush = new(Color.FromArgb(this._IsDarkThemeActive == true ? 72 : 34, 0, 0, 0));
+                e.Graphics.FillPath(shadowBrush, shadowPath);
+            }
+
+            using (GraphicsPath path = CreateRoundedRectanglePath(drawRect, 12))
             using (SolidBrush fillBrush = new(cardColor))
             using (Pen borderPen = new(borderColor))
             {
@@ -4596,11 +5178,10 @@ namespace SAM.Picker
             }
 
             Rectangle imageRect = new(
-                cardRect.X + 8,
-                cardRect.Y + 8,
-                cardRect.Width - 16,
-                Math.Max(26, cardRect.Height - 36));
-
+                drawRect.X + 8,
+                drawRect.Y + 8,
+                drawRect.Width - 16,
+                Math.Max(20, drawRect.Height - 60));
             if (info.ImageIndex >= 0 && info.ImageIndex < this._LogoImageList.Images.Count)
             {
                 Image image = this._LogoImageList.Images[info.ImageIndex];
@@ -4611,35 +5192,101 @@ namespace SAM.Picker
                 }
             }
 
-            Rectangle textRect = new(
-                cardRect.X + 10,
-                cardRect.Bottom - 24,
-                cardRect.Width - 20,
-                18);
+            Rectangle titleRect = new(
+                drawRect.X + 10,
+                drawRect.Bottom - 48,
+                drawRect.Width - 20,
+                16);
+            Rectangle progressTextRect = new(
+                drawRect.X + 10,
+                drawRect.Bottom - 31,
+                drawRect.Width - 20,
+                14);
+            Rectangle progressBarRect = new(
+                drawRect.X + 10,
+                drawRect.Bottom - 14,
+                drawRect.Width - 20,
+                6);
 
-            using (StringFormat format = new()
+            int total = info.AchievementTotal;
+            int unlocked = info.AchievementUnlocked;
+            double ratio = 0.0;
+            string progressText;
+            if (info.HasAchievementProgress == true && total > 0)
+            {
+                if (unlocked < 0)
+                {
+                    unlocked = 0;
+                }
+                if (unlocked > total)
+                {
+                    unlocked = total;
+                }
+
+                ratio = (double)unlocked / total;
+                progressText = $"{unlocked}/{total} ({(ratio * 100.0).ToString("0.#", CultureInfo.CurrentCulture)}%)";
+            }
+            else if (info.HasAchievementProgress == true)
+            {
+                progressText = "0/0";
+            }
+            else
+            {
+                progressText = "Not scanned";
+            }
+
+            using (StringFormat centered = new()
             {
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center,
                 Trimming = StringTrimming.EllipsisCharacter,
                 FormatFlags = StringFormatFlags.NoWrap,
             })
-            using (SolidBrush textBrush = new(selected == true
-                ? (blocked == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 244, 246) : Color.FromArgb(118, 10, 24))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(245, 248, 255) : Color.FromArgb(19, 52, 128)))
-                : (blocked == true
-                    ? (this._IsDarkThemeActive == true ? Color.FromArgb(255, 214, 220) : Color.FromArgb(126, 24, 36))
-                    : (this._IsDarkThemeActive == true ? Color.FromArgb(224, 228, 236) : Color.FromArgb(30, 30, 34)))))
+            using (SolidBrush titleBrush = new(selected == true
+                ? (blocked == true ? this._GameCardBlockedSelectedTextColor : this._GameCardSelectedTextColor)
+                : (blocked == true ? this._GameCardBlockedTextColor : this._GameCardTextColor)))
+            using (SolidBrush mutedBrush = new(this._GameCardMutedTextColor))
+            using (SolidBrush trackBrush = new(this._GameCardProgressTrackColor))
+            using (SolidBrush fillBrush = new(this._GameCardProgressFillColor))
             {
-                e.Graphics.DrawString(info.DisplayName, this._GameListView.Font, textBrush, textRect, format);
+                e.Graphics.DrawString(info.DisplayName, this._GameListView.Font, titleBrush, titleRect, centered);
+                e.Graphics.DrawString(progressText, this._GameListView.Font, mutedBrush, progressTextRect, centered);
+
+                using GraphicsPath trackPath = CreateRoundedRectanglePath(progressBarRect, Math.Max(2, progressBarRect.Height / 2));
+                e.Graphics.FillPath(trackBrush, trackPath);
+                if (ratio > 0.0)
+                {
+                    int fillWidth = (int)Math.Round(progressBarRect.Width * ratio, MidpointRounding.AwayFromZero);
+                    if (fillWidth > 0)
+                    {
+                        Rectangle fillRect = new(progressBarRect.X, progressBarRect.Y, fillWidth, progressBarRect.Height);
+                        using GraphicsPath fillPath = CreateRoundedRectanglePath(fillRect, Math.Max(2, fillRect.Height / 2));
+                        e.Graphics.FillPath(fillBrush, fillPath);
+                    }
+                }
             }
         }
 
         private static GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
         {
-            int diameter = radius * 2;
             GraphicsPath path = new();
+
+            if (bounds.Width <= 2 || bounds.Height <= 2 || radius <= 1)
+            {
+                path.AddRectangle(bounds);
+                path.CloseFigure();
+                return path;
+            }
+
+            int clampedRadius = Math.Min(radius, Math.Min(bounds.Width, bounds.Height) / 2);
+            if (clampedRadius <= 1)
+            {
+                path.AddRectangle(bounds);
+                path.CloseFigure();
+                return path;
+            }
+
+            int diameter = clampedRadius * 2;
 
             path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
             path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);

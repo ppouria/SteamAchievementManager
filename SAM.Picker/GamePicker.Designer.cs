@@ -67,6 +67,14 @@
             this._ThemeLightMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._ThemeDarkMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this._FilterLoadingLabel = new System.Windows.Forms.ToolStripLabel();
+            this._SummaryCardPanel = new System.Windows.Forms.Panel();
+            this._SummaryMetricsTable = new System.Windows.Forms.TableLayoutPanel();
+            this._SummaryGamesLabel = new System.Windows.Forms.Label();
+            this._SummaryAchievementsLabel = new System.Windows.Forms.Label();
+            this._SummaryUnlockedLabel = new System.Windows.Forms.Label();
+            this._SummaryCompletionLabel = new System.Windows.Forms.Label();
+            this._SummaryTitleLabel = new System.Windows.Forms.Label();
+            this._SummaryDetailsLabel = new System.Windows.Forms.Label();
             this._GameListView = new SAM.Picker.MyListView();
             this._PickerStatusStrip = new System.Windows.Forms.StatusStrip();
             this._PickerStatusLabel = new System.Windows.Forms.ToolStripStatusLabel();
@@ -80,6 +88,8 @@
             _ToolStripSeparator4 = new System.Windows.Forms.ToolStripSeparator();
             _ToolStripSeparator5 = new System.Windows.Forms.ToolStripSeparator();
             this._PickerToolStrip.SuspendLayout();
+            this._SummaryCardPanel.SuspendLayout();
+            this._SummaryMetricsTable.SuspendLayout();
             this._PickerStatusStrip.SuspendLayout();
             this.SuspendLayout();
             //
@@ -155,11 +165,13 @@
             //
             // _RefreshGamesButton
             //
+            this._RefreshGamesButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this._RefreshGamesButton.Image = global::SAM.Picker.Resources.Refresh;
             this._RefreshGamesButton.ImageTransparentColor = System.Drawing.Color.Magenta;
             this._RefreshGamesButton.Name = "_RefreshGamesButton";
-            this._RefreshGamesButton.Size = new System.Drawing.Size(105, 22);
-            this._RefreshGamesButton.Text = "Refresh Games";
+            this._RefreshGamesButton.Size = new System.Drawing.Size(23, 22);
+            this._RefreshGamesButton.Text = "Refresh";
+            this._RefreshGamesButton.ToolTipText = "Refresh";
             this._RefreshGamesButton.Click += new System.EventHandler(this.OnRefresh);
             //
             // _AddGameTextBox
@@ -389,6 +401,99 @@
             this._FilterLoadingLabel.ToolTipText = "Loading";
             this._FilterLoadingLabel.Visible = false;
             //
+            // _SummaryCardPanel
+            //
+            this._SummaryCardPanel.Controls.Add(this._SummaryMetricsTable);
+            this._SummaryCardPanel.Controls.Add(this._SummaryTitleLabel);
+            this._SummaryCardPanel.Controls.Add(this._SummaryDetailsLabel);
+            this._SummaryCardPanel.Dock = System.Windows.Forms.DockStyle.Top;
+            this._SummaryCardPanel.Location = new System.Drawing.Point(0, 25);
+            this._SummaryCardPanel.Name = "_SummaryCardPanel";
+            this._SummaryCardPanel.Padding = new System.Windows.Forms.Padding(12, 8, 12, 8);
+            this._SummaryCardPanel.Size = new System.Drawing.Size(742, 84);
+            this._SummaryCardPanel.TabIndex = 3;
+            //
+            // _SummaryMetricsTable
+            //
+            this._SummaryMetricsTable.ColumnCount = 4;
+            this._SummaryMetricsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this._SummaryMetricsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this._SummaryMetricsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this._SummaryMetricsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this._SummaryMetricsTable.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this._SummaryMetricsTable.Controls.Add(this._SummaryGamesLabel, 0, 0);
+            this._SummaryMetricsTable.Controls.Add(this._SummaryAchievementsLabel, 1, 0);
+            this._SummaryMetricsTable.Controls.Add(this._SummaryUnlockedLabel, 2, 0);
+            this._SummaryMetricsTable.Controls.Add(this._SummaryCompletionLabel, 3, 0);
+            this._SummaryMetricsTable.Location = new System.Drawing.Point(12, 30);
+            this._SummaryMetricsTable.Name = "_SummaryMetricsTable";
+            this._SummaryMetricsTable.RowCount = 1;
+            this._SummaryMetricsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this._SummaryMetricsTable.Size = new System.Drawing.Size(718, 46);
+            this._SummaryMetricsTable.TabIndex = 2;
+            //
+            // _SummaryGamesLabel
+            //
+            this._SummaryGamesLabel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._SummaryGamesLabel.Location = new System.Drawing.Point(3, 0);
+            this._SummaryGamesLabel.Name = "_SummaryGamesLabel";
+            this._SummaryGamesLabel.Size = new System.Drawing.Size(173, 46);
+            this._SummaryGamesLabel.TabIndex = 0;
+            this._SummaryGamesLabel.Text = "Games\r\n0";
+            this._SummaryGamesLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            // _SummaryAchievementsLabel
+            //
+            this._SummaryAchievementsLabel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._SummaryAchievementsLabel.Location = new System.Drawing.Point(182, 0);
+            this._SummaryAchievementsLabel.Name = "_SummaryAchievementsLabel";
+            this._SummaryAchievementsLabel.Size = new System.Drawing.Size(173, 46);
+            this._SummaryAchievementsLabel.TabIndex = 1;
+            this._SummaryAchievementsLabel.Text = "Achievements\r\n0";
+            this._SummaryAchievementsLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            // _SummaryUnlockedLabel
+            //
+            this._SummaryUnlockedLabel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._SummaryUnlockedLabel.Location = new System.Drawing.Point(361, 0);
+            this._SummaryUnlockedLabel.Name = "_SummaryUnlockedLabel";
+            this._SummaryUnlockedLabel.Size = new System.Drawing.Size(173, 46);
+            this._SummaryUnlockedLabel.TabIndex = 2;
+            this._SummaryUnlockedLabel.Text = "Unlocked\r\n0";
+            this._SummaryUnlockedLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            // _SummaryCompletionLabel
+            //
+            this._SummaryCompletionLabel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._SummaryCompletionLabel.Location = new System.Drawing.Point(540, 0);
+            this._SummaryCompletionLabel.Name = "_SummaryCompletionLabel";
+            this._SummaryCompletionLabel.Size = new System.Drawing.Size(175, 46);
+            this._SummaryCompletionLabel.TabIndex = 3;
+            this._SummaryCompletionLabel.Text = "Completion\r\nn/a";
+            this._SummaryCompletionLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            // _SummaryTitleLabel
+            //
+            this._SummaryTitleLabel.AutoSize = true;
+            this._SummaryTitleLabel.Location = new System.Drawing.Point(12, 10);
+            this._SummaryTitleLabel.Name = "_SummaryTitleLabel";
+            this._SummaryTitleLabel.Size = new System.Drawing.Size(83, 15);
+            this._SummaryTitleLabel.TabIndex = 0;
+            this._SummaryTitleLabel.Text = "Steam Overview";
+            //
+            // _SummaryDetailsLabel
+            //
+            this._SummaryDetailsLabel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this._SummaryDetailsLabel.AutoEllipsis = true;
+            this._SummaryDetailsLabel.Location = new System.Drawing.Point(297, 10);
+            this._SummaryDetailsLabel.Name = "_SummaryDetailsLabel";
+            this._SummaryDetailsLabel.Size = new System.Drawing.Size(433, 15);
+            this._SummaryDetailsLabel.TabIndex = 1;
+            this._SummaryDetailsLabel.Text = "0 visible • 0/0 scanned • 0 incomplete";
+            this._SummaryDetailsLabel.TextAlign = System.Drawing.ContentAlignment.TopRight;
+            //
             // _GameListView
             //
             this._GameListView.BackColor = System.Drawing.Color.Black;
@@ -396,11 +501,11 @@
             this._GameListView.ForeColor = System.Drawing.Color.White;
             this._GameListView.HideSelection = false;
             this._GameListView.LargeImageList = this._LogoImageList;
-            this._GameListView.Location = new System.Drawing.Point(0, 25);
+            this._GameListView.Location = new System.Drawing.Point(0, 109);
             this._GameListView.MultiSelect = true;
             this._GameListView.Name = "_GameListView";
             this._GameListView.OwnerDraw = true;
-            this._GameListView.Size = new System.Drawing.Size(742, 245);
+            this._GameListView.Size = new System.Drawing.Size(742, 161);
             this._GameListView.SmallImageList = this._LogoSmallImageList;
             this._GameListView.Sorting = System.Windows.Forms.SortOrder.Ascending;
             this._GameListView.TabIndex = 0;
@@ -465,6 +570,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(742, 292);
             this.Controls.Add(this._GameListView);
+            this.Controls.Add(this._SummaryCardPanel);
             this.Controls.Add(this._PickerStatusStrip);
             this.Controls.Add(this._PickerToolStrip);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
@@ -472,6 +578,9 @@
             this.Text = "Steam Achievement Manager | Pick a game... Any game...";
             this._PickerToolStrip.ResumeLayout(false);
             this._PickerToolStrip.PerformLayout();
+            this._SummaryMetricsTable.ResumeLayout(false);
+            this._SummaryCardPanel.ResumeLayout(false);
+            this._SummaryCardPanel.PerformLayout();
             this._PickerStatusStrip.ResumeLayout(false);
             this._PickerStatusStrip.PerformLayout();
             this.ResumeLayout(false);
@@ -517,6 +626,14 @@
         private System.Windows.Forms.ToolStripMenuItem _ThemeSystemMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _ThemeLightMenuItem;
         private System.Windows.Forms.ToolStripMenuItem _ThemeDarkMenuItem;
+        private System.Windows.Forms.Panel _SummaryCardPanel;
+        private System.Windows.Forms.TableLayoutPanel _SummaryMetricsTable;
+        private System.Windows.Forms.Label _SummaryGamesLabel;
+        private System.Windows.Forms.Label _SummaryAchievementsLabel;
+        private System.Windows.Forms.Label _SummaryUnlockedLabel;
+        private System.Windows.Forms.Label _SummaryCompletionLabel;
+        private System.Windows.Forms.Label _SummaryTitleLabel;
+        private System.Windows.Forms.Label _SummaryDetailsLabel;
 
         #endregion
     }

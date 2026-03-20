@@ -143,13 +143,13 @@ namespace SAM.Game
                 return;
             }
 
-            if (TryGetAchievementProgress(appId, out var unlocked, out var total) == false)
+            if (TryGetAchievementProgress(appId, out var unlocked, out var total, out bool? unlockBlocked) == false)
             {
                 Console.WriteLine("ERR scan_failed");
                 return;
             }
 
-            Console.WriteLine($"{unlocked} {total}");
+            Console.WriteLine($"{unlocked} {total} {FormatUnlockBlockedToken(unlockBlocked)}");
         }
 
         private sealed class UnlockAllResult
@@ -158,6 +158,7 @@ namespace SAM.Game
             public int SkippedProtected { get; set; }
             public int Unlocked { get; set; }
             public int Total { get; set; }
+            public bool? UnlockBlocked { get; set; }
         }
 
         [DataContract]
@@ -221,7 +222,17 @@ namespace SAM.Game
             }
 
             Console.WriteLine(
-                $"OK {result.Changed} {result.SkippedProtected} {result.Unlocked} {result.Total}");
+                $"OK {result.Changed} {result.SkippedProtected} {result.Unlocked} {result.Total} {FormatUnlockBlockedToken(result.UnlockBlocked)}");
+        }
+
+        private static string FormatUnlockBlockedToken(bool? unlockBlocked)
+        {
+            if (unlockBlocked.HasValue == false)
+            {
+                return "-1";
+            }
+
+            return unlockBlocked.Value == true ? "1" : "0";
         }
 
         private static string GetAchievementStatusDatabasePath()
@@ -363,6 +374,7 @@ namespace SAM.Game
                 SkippedProtected = 0,
                 Unlocked = -1,
                 Total = -1,
+                UnlockBlocked = null,
             };
             errorCode = null;
 
@@ -388,6 +400,7 @@ namespace SAM.Game
                 {
                     result.Unlocked = unlocked;
                     result.Total = total;
+                    result.UnlockBlocked = false;
                     TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                     return true;
                 }
@@ -402,6 +415,7 @@ namespace SAM.Game
                 {
                     result.Unlocked = unlocked;
                     result.Total = total;
+                    result.UnlockBlocked = false;
                     TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                     return true;
                 }
@@ -415,6 +429,7 @@ namespace SAM.Game
             {
                 result.Unlocked = 0;
                 result.Total = 0;
+                result.UnlockBlocked = false;
                 TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, false);
                 return true;
             }
@@ -479,6 +494,7 @@ namespace SAM.Game
             result.Unlocked = finalUnlocked;
             result.Total = finalTotal;
             bool unlockBlocked = totalAchievements > 0 && protectedAchievements >= totalAchievements;
+            result.UnlockBlocked = unlockBlocked;
             TryUpdateAchievementStatusDatabase(client, appId, result.Unlocked, result.Total, unlockBlocked);
             return true;
         }
@@ -639,10 +655,11 @@ namespace SAM.Game
             return true;
         }
 
-        private static bool TryGetAchievementProgress(long appId, out int unlocked, out int total)
+        private static bool TryGetAchievementProgress(long appId, out int unlocked, out int total, out bool? unlockBlocked)
         {
             unlocked = -1;
             total = -1;
+            unlockBlocked = null;
 
             using API.Client client = new();
             try
@@ -680,7 +697,8 @@ namespace SAM.Game
             {
                 if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
                 {
-                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
+                    unlockBlocked = false;
+                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, unlockBlocked);
                     return true;
                 }
                 return false;
@@ -697,7 +715,8 @@ namespace SAM.Game
             {
                 if (TryTreatAsNoAchievementGame(client, out unlocked, out total) == true)
                 {
-                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
+                    unlockBlocked = false;
+                    TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, unlockBlocked);
                     return true;
                 }
                 return false;
@@ -708,12 +727,15 @@ namespace SAM.Game
             {
                 unlocked = 0;
                 total = 0;
-                TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, false);
+                unlockBlocked = false;
+                TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, unlockBlocked);
                 return true;
             }
 
+            bool hasProtectedSchema = TryGetProtectedAchievementIds(appId, out HashSet<string> protectedIds);
             int found = 0;
             int achieved = 0;
+            int protectedCount = 0;
             for (uint i = 0; i < achievementCount; i++)
             {
                 var achievementId = client.SteamUserStats.GetAchievementName(i);
@@ -723,6 +745,11 @@ namespace SAM.Game
                 }
 
                 found++;
+                if (hasProtectedSchema == true && protectedIds.Contains(achievementId) == true)
+                {
+                    protectedCount++;
+                }
+
                 if (client.SteamUserStats.GetAchievement(achievementId, out var isAchieved) == true &&
                     isAchieved == true)
                 {
@@ -732,7 +759,10 @@ namespace SAM.Game
 
             unlocked = achieved;
             total = found;
-            TryUpdateAchievementStatusDatabase(client, appId, unlocked, total);
+            unlockBlocked = hasProtectedSchema == true && found > 0
+                ? protectedCount >= found
+                : null;
+            TryUpdateAchievementStatusDatabase(client, appId, unlocked, total, unlockBlocked);
             return true;
         }
 

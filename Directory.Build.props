@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <!-- Central pro2ect metadata: edit here once for all projects -->
-    <SAMVersion>1.1.2</SAMVersion>
+    <SAMVersion>1.4.0</SAMVersion>
     <SAMCompany>Gibbed</SAMCompany>
     <SAMAuthors>Gibbed</SAMAuthors>
     <SAMRepositoryUrl>https://github.com/ppouria/SteamAchievementManager/</SAMRepositoryUrl>

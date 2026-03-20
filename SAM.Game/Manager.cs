@@ -161,6 +161,14 @@ namespace SAM.Game
             public override Color ButtonPressedGradientMiddle => this._menuPressedColor;
             public override Color ButtonPressedGradientEnd => this._menuPressedColor;
             public override Color ButtonPressedBorder => this._menuBorderColor;
+            public override Color OverflowButtonGradientBegin => this._menuBackColor;
+            public override Color OverflowButtonGradientMiddle => this._menuSelectedColor;
+            public override Color OverflowButtonGradientEnd => this._menuPressedColor;
+            public override Color ButtonCheckedGradientBegin => this._menuSelectedColor;
+            public override Color ButtonCheckedGradientMiddle => this._menuSelectedColor;
+            public override Color ButtonCheckedGradientEnd => this._menuSelectedColor;
+            public override Color ButtonCheckedHighlight => this._menuSelectedColor;
+            public override Color ButtonCheckedHighlightBorder => this._menuBorderColor;
         }
 
         [DataContract]
@@ -216,6 +224,7 @@ namespace SAM.Game
             this._AutoSelectCountTextBox.Text = "25";
             this._TimedUnlockHoursTextBox.Text = "72";
             this._MainTabControl.DrawItem += this.OnMainTabControlDrawItem;
+            this._MainTabControl.Paint += this.OnMainTabControlPaint;
             this.UpdateTimedUnlockControlsState();
 
             this._MainTabControl.SelectedTab = this._AchievementsTabPage;
@@ -442,27 +451,28 @@ namespace SAM.Game
 
             this._IsDarkThemeActive = this.GetResolvedThemeMode() == ThemeMode.Dark;
 
-            Color windowBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(30, 32, 37) : Color.FromArgb(242, 242, 247);
-            Color foregroundColor = this._IsDarkThemeActive == true ? Color.FromArgb(232, 235, 241) : Color.FromArgb(24, 24, 28);
-            Color mutedTextColor = this._IsDarkThemeActive == true ? Color.FromArgb(168, 173, 184) : Color.FromArgb(110, 110, 116);
-            Color inputBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(46, 49, 56) : Color.White;
-            Color toolStripBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(38, 40, 46) : Color.FromArgb(252, 252, 253);
-            Color statusBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 41) : Color.FromArgb(248, 248, 250);
-            Color tabPageBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(34, 36, 42) : Color.FromArgb(247, 247, 250);
-            Color listBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(37, 39, 45) : Color.White;
-            Color tabSelectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(56, 60, 69) : Color.White;
-            Color tabSelectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(240, 244, 252) : Color.FromArgb(28, 34, 44);
-            Color tabUnselectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(39, 42, 49) : Color.FromArgb(239, 242, 248);
-            Color tabUnselectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(176, 182, 194) : Color.FromArgb(92, 101, 116);
-            Color tabBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(78, 83, 95) : Color.FromArgb(207, 214, 226);
-            Color listHeaderBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(49, 53, 61) : Color.FromArgb(246, 247, 251);
-            Color listHeaderForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(236, 239, 246) : Color.FromArgb(27, 31, 39);
-            Color listHeaderBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(79, 84, 96) : Color.FromArgb(218, 222, 230);
+            Color accentColor = this._IsDarkThemeActive == true ? Color.FromArgb(92, 166, 255) : Color.FromArgb(46, 119, 230);
+            Color windowBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(13, 23, 35) : Color.FromArgb(239, 245, 252);
+            Color foregroundColor = this._IsDarkThemeActive == true ? Color.FromArgb(230, 238, 249) : Color.FromArgb(24, 41, 69);
+            Color mutedTextColor = this._IsDarkThemeActive == true ? Color.FromArgb(157, 174, 198) : Color.FromArgb(96, 116, 146);
+            Color inputBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(24, 35, 50) : Color.White;
+            Color toolStripBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(17, 29, 44) : Color.FromArgb(255, 255, 255);
+            Color statusBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(16, 27, 41) : Color.FromArgb(245, 249, 255);
+            Color tabPageBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(12, 22, 36) : Color.FromArgb(242, 248, 255);
+            Color listBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(15, 27, 43) : Color.FromArgb(250, 253, 255);
+            Color tabSelectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(37, 67, 103) : Color.FromArgb(228, 240, 255);
+            Color tabSelectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(245, 249, 255) : Color.FromArgb(17, 57, 130);
+            Color tabUnselectedBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(23, 39, 60) : Color.FromArgb(255, 255, 255);
+            Color tabUnselectedForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(168, 184, 205) : Color.FromArgb(103, 121, 151);
+            Color tabBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(51, 72, 101) : Color.FromArgb(201, 219, 242);
+            Color listHeaderBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(24, 38, 57) : Color.FromArgb(246, 251, 255);
+            Color listHeaderForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(230, 238, 249) : Color.FromArgb(24, 41, 69);
+            Color listHeaderBorderColor = this._IsDarkThemeActive == true ? Color.FromArgb(61, 82, 112) : Color.FromArgb(205, 221, 241);
 
             this._AchievementItemBackColor = listBackColor;
             this._AchievementItemForeColor = foregroundColor;
-            this._ProtectedAchievementBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(78, 42, 48) : Color.FromArgb(255, 245, 246);
-            this._ProtectedAchievementForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(255, 189, 197) : Color.FromArgb(126, 24, 36);
+            this._ProtectedAchievementBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(85, 45, 55) : Color.FromArgb(255, 235, 239);
+            this._ProtectedAchievementForeColor = this._IsDarkThemeActive == true ? Color.FromArgb(255, 220, 225) : Color.FromArgb(129, 35, 50);
             this._TabSelectedBackColor = tabSelectedBackColor;
             this._TabSelectedForeColor = tabSelectedForeColor;
             this._TabUnselectedBackColor = tabUnselectedBackColor;
@@ -471,6 +481,7 @@ namespace SAM.Game
 
             this.BackColor = windowBackColor;
             this.ForeColor = foregroundColor;
+            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
             this.MinimumSize = new Size(980, 620);
             if (this.ClientSize.Width < 980 || this.ClientSize.Height < 620)
             {
@@ -484,25 +495,26 @@ namespace SAM.Game
             this._MainToolStrip.Padding = new Padding(10, 6, 10, 6);
             this._MainToolStrip.AutoSize = false;
             this._MainToolStrip.Height = 44;
+            this._MainToolStrip.CanOverflow = false;
             if (this._IsDarkThemeActive == true)
             {
                 DarkToolStripColorTable stripColorTable = new(
                     toolStripBackColor,
-                    Color.FromArgb(43, 46, 54),
-                    Color.FromArgb(68, 73, 84),
-                    Color.FromArgb(67, 95, 150),
-                    Color.FromArgb(78, 111, 173),
-                    Color.FromArgb(56, 61, 70));
+                    Color.FromArgb(24, 38, 57),
+                    Color.FromArgb(61, 82, 112),
+                    BlendColor(toolStripBackColor, accentColor, 0.45f),
+                    BlendColor(toolStripBackColor, accentColor, 0.58f),
+                    Color.FromArgb(50, 69, 95));
                 this._DarkToolStripRenderer = new ToolStripProfessionalRenderer(
                     stripColorTable);
                 this._DarkStatusStripRenderer = new ToolStripProfessionalRenderer(
                     new DarkToolStripColorTable(
                         statusBackColor,
-                        Color.FromArgb(43, 46, 54),
-                        Color.FromArgb(68, 73, 84),
-                        Color.FromArgb(67, 95, 150),
-                        Color.FromArgb(78, 111, 173),
-                        Color.FromArgb(56, 61, 70)));
+                        Color.FromArgb(24, 38, 57),
+                        Color.FromArgb(61, 82, 112),
+                        BlendColor(statusBackColor, accentColor, 0.45f),
+                        BlendColor(statusBackColor, accentColor, 0.58f),
+                        Color.FromArgb(50, 69, 95)));
                 this._MainToolStrip.Renderer = this._DarkToolStripRenderer;
                 this._MainStatusStrip.Renderer = this._DarkStatusStripRenderer;
             }
@@ -518,6 +530,8 @@ namespace SAM.Game
             this._AchievementsToolStrip.Padding = new Padding(8, 6, 8, 6);
             this._AchievementsToolStrip.AutoSize = false;
             this._AchievementsToolStrip.Height = 40;
+            this._AchievementsToolStrip.Stretch = true;
+            this._AchievementsToolStrip.CanOverflow = false;
             if (this._IsDarkThemeActive == true && this._DarkToolStripRenderer != null)
             {
                 this._AchievementsToolStrip.Renderer = this._DarkToolStripRenderer;
@@ -545,19 +559,19 @@ namespace SAM.Game
             this._TimedUnlockLabel.ForeColor = mutedTextColor;
 
             this._MatchingStringTextBox.AutoSize = false;
-            this._MatchingStringTextBox.Size = new Size(180, 26);
+            this._MatchingStringTextBox.Size = new Size(124, 26);
             this._MatchingStringTextBox.BorderStyle = BorderStyle.FixedSingle;
             this._MatchingStringTextBox.BackColor = inputBackColor;
             this._MatchingStringTextBox.ForeColor = this.ForeColor;
 
             this._AutoSelectCountTextBox.AutoSize = false;
-            this._AutoSelectCountTextBox.Size = new Size(70, 26);
+            this._AutoSelectCountTextBox.Size = new Size(56, 26);
             this._AutoSelectCountTextBox.BorderStyle = BorderStyle.FixedSingle;
             this._AutoSelectCountTextBox.BackColor = inputBackColor;
             this._AutoSelectCountTextBox.ForeColor = this.ForeColor;
 
             this._TimedUnlockHoursTextBox.AutoSize = false;
-            this._TimedUnlockHoursTextBox.Size = new Size(70, 26);
+            this._TimedUnlockHoursTextBox.Size = new Size(56, 26);
             this._TimedUnlockHoursTextBox.BorderStyle = BorderStyle.FixedSingle;
             this._TimedUnlockHoursTextBox.BackColor = inputBackColor;
             this._TimedUnlockHoursTextBox.ForeColor = this.ForeColor;
@@ -579,8 +593,10 @@ namespace SAM.Game
             }
 
             this._MainTabControl.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-            this._MainTabControl.Padding = new Point(18, 8);
+            this._MainTabControl.Padding = new Point(12, 6);
             this._MainTabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            this._MainTabControl.SizeMode = TabSizeMode.Fixed;
+            this._MainTabControl.ItemSize = new Size(120, 30);
             this._MainTabControl.BackColor = tabPageBackColor;
             this._MainTabControl.ForeColor = this.ForeColor;
             this._MainTabControl.Appearance = TabAppearance.Normal;
@@ -620,19 +636,21 @@ namespace SAM.Game
 
             this._StatisticsDataGridView.BackgroundColor = listBackColor;
             this._StatisticsDataGridView.BorderStyle = BorderStyle.None;
-            this._StatisticsDataGridView.GridColor = this._IsDarkThemeActive == true ? Color.FromArgb(76, 80, 90) : Color.FromArgb(232, 234, 239);
+            this._StatisticsDataGridView.GridColor = this._IsDarkThemeActive == true ? Color.FromArgb(58, 80, 110) : Color.FromArgb(214, 227, 244);
             this._StatisticsDataGridView.EnableHeadersVisualStyles = false;
             this._StatisticsDataGridView.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(52, 55, 63) : Color.FromArgb(246, 247, 251);
+            this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(24, 38, 57) : Color.FromArgb(246, 251, 255);
             this._StatisticsDataGridView.ColumnHeadersDefaultCellStyle.ForeColor = this.ForeColor;
             this._StatisticsDataGridView.DefaultCellStyle.BackColor = listBackColor;
             this._StatisticsDataGridView.DefaultCellStyle.ForeColor = this.ForeColor;
-            this._StatisticsDataGridView.DefaultCellStyle.SelectionBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(71, 104, 168) : Color.FromArgb(223, 231, 246);
+            this._StatisticsDataGridView.DefaultCellStyle.SelectionBackColor = this._IsDarkThemeActive == true ? Color.FromArgb(37, 67, 103) : Color.FromArgb(228, 240, 255);
             this._StatisticsDataGridView.DefaultCellStyle.SelectionForeColor = this.ForeColor;
-            this._StatisticsDataGridView.AlternatingRowsDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(42, 45, 52) : Color.FromArgb(250, 251, 255);
+            this._StatisticsDataGridView.AlternatingRowsDefaultCellStyle.BackColor = this._IsDarkThemeActive == true ? Color.FromArgb(20, 33, 50) : Color.FromArgb(255, 255, 255);
             this._StatisticsDataGridView.RowHeadersVisible = false;
 
             this._EnableStatsEditingCheckBox.ForeColor = mutedTextColor;
+            this._EnableStatsEditingCheckBox.BackColor = tabPageBackColor;
+            this._EnableStatsEditingCheckBox.UseVisualStyleBackColor = false;
 
             this.LayoutMainContent();
             this.ApplyWindowDarkTitleBar();
@@ -641,6 +659,24 @@ namespace SAM.Game
             this._MainTabControl.Invalidate();
             this.UpdateTimedUnlockControlsState();
             this.ResumeLayout(true);
+        }
+
+        private static Color BlendColor(Color baseColor, Color overlayColor, float ratio)
+        {
+            if (ratio <= 0f)
+            {
+                return baseColor;
+            }
+
+            if (ratio >= 1f)
+            {
+                return overlayColor;
+            }
+
+            int r = (int)Math.Round(baseColor.R + ((overlayColor.R - baseColor.R) * ratio), MidpointRounding.AwayFromZero);
+            int g = (int)Math.Round(baseColor.G + ((overlayColor.G - baseColor.G) * ratio), MidpointRounding.AwayFromZero);
+            int b = (int)Math.Round(baseColor.B + ((overlayColor.B - baseColor.B) * ratio), MidpointRounding.AwayFromZero);
+            return Color.FromArgb(r, g, b);
         }
 
         private void LayoutMainContent()
@@ -666,8 +702,8 @@ namespace SAM.Game
 
             button.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
             button.ForeColor = this.ForeColor;
-            button.Padding = new Padding(8, 0, 8, 0);
-            button.Margin = new Padding(0, 0, 4, 0);
+            button.Padding = new Padding(6, 0, 6, 0);
+            button.Margin = new Padding(0, 0, 2, 0);
 
             if (textOnly == true || button.Image == null)
             {
@@ -699,26 +735,9 @@ namespace SAM.Game
             this.ApplyWindowDarkTitleBar();
             this.ApplyScrollBarTheme(this._StatisticsDataGridView);
             this._AchievementListView.UseDarkScrollBars = this._IsDarkThemeActive;
-        }
-
-        protected override void OnActivated(EventArgs e)
-        {
-            base.OnActivated(e);
-
-            ThemeMode themeMode = LoadThemeModeFromPickerPreferences();
-            if (themeMode == this._ThemeMode)
-            {
-                return;
-            }
-
-            this._ThemeMode = themeMode;
-            this.ApplyModernTheme();
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            this.StopTimedUnlock("Timed unlock stopped because window is closing.", false);
-            base.OnFormClosing(e);
+            this._AchievementListView.BorderStyle = BorderStyle.None;
+            this._AchievementListView.GridLines = false;
+            this._MainTabControl.Invalidate();
         }
 
         private void OnMainTabControlDrawItem(object sender, DrawItemEventArgs e)
@@ -745,16 +764,16 @@ namespace SAM.Game
 
             Rectangle bounds = tabControl.GetTabRect(e.Index);
             bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-
             Color backColor = selected == true ? this._TabSelectedBackColor : this._TabUnselectedBackColor;
             Color foreColor = selected == true ? this._TabSelectedForeColor : this._TabUnselectedForeColor;
 
-            using SolidBrush backBrush = new(backColor);
-            using Pen borderPen = new(this._TabBorderColor);
-            e.Graphics.FillRectangle(backBrush, bounds);
-
-            Rectangle borderRect = new(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
-            e.Graphics.DrawRectangle(borderPen, borderRect);
+            using (SolidBrush backBrush = new(backColor))
+            using (Pen borderPen = new(this._TabBorderColor))
+            {
+                e.Graphics.FillRectangle(backBrush, bounds);
+                Rectangle borderRect = new(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+                e.Graphics.DrawRectangle(borderPen, borderRect);
+            }
 
             TextRenderer.DrawText(
                 e.Graphics,
@@ -763,6 +782,44 @@ namespace SAM.Game
                 bounds,
                 foreColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+
+        private void OnMainTabControlPaint(object sender, PaintEventArgs e)
+        {
+            if (sender is not TabControl tabControl)
+            {
+                return;
+            }
+
+            Rectangle pageBounds = tabControl.DisplayRectangle;
+            if (pageBounds.Width <= 1 || pageBounds.Height <= 1)
+            {
+                return;
+            }
+
+            pageBounds.Inflate(1, 1);
+            using Pen pen = new(this._TabBorderColor);
+            e.Graphics.DrawRectangle(pen, pageBounds);
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+
+            ThemeMode themeMode = LoadThemeModeFromPickerPreferences();
+            if (themeMode == this._ThemeMode)
+            {
+                return;
+            }
+
+            this._ThemeMode = themeMode;
+            this.ApplyModernTheme();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            this.StopTimedUnlock("Timed unlock stopped because window is closing.", false);
+            base.OnFormClosing(e);
         }
 
         private void UpdateTimedUnlockControlsState()
